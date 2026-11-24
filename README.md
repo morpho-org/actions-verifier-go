@@ -66,14 +66,15 @@ authorization signatures are not verified. API attribution with no origin
 specified in the request is not authenticated.
 
 For vault deposits, the underlying ERC-20 is not identified by the request
-or the bundle arguments. If an approval is present, it must be the only
-approval, grant the pinned deposit bundle either at most the requested assets
-or the SDK's unlimited allowance (`maxUint256`), and not target a pinned
-Morpho contract or the intended vault. An unlimited approval can outlast the
-transaction, and the response supplies its token address. A passing check
-cannot identify the correct underlying token or
-tell whether an approval was required, so a deposit can also have no
-approval. Applications that need token identity must obtain it separately.
+or the bundle arguments. A deposit can have no approval, one approval, or
+the SDK's zero-reset sequence: an approval for zero immediately followed by
+a positive approval for the same token and spender. The spender must be the
+pinned deposit bundle, and the token cannot be a pinned Morpho contract or
+the intended vault. The final approval can grant up to the requested assets
+or the SDK's unlimited allowance (`maxUint256`). An unlimited approval can
+outlast the transaction. A passing result cannot establish that the token
+chosen by the response is the vault's underlying asset or that an approval
+was necessary.
 Where the loan or collateral token is in market parameters that hash to
 the requested market ID, the approval target must match that token. Blue
 funding paths accept the SDK's persistent approvals to the pinned spender,
