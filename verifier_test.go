@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"strings"
@@ -104,6 +105,22 @@ func TestVaultForceRedeemReceiver(t *testing.T) {
 		if Verify(f.Intent, f.Calls) {
 			t.Fatal("wrong account accepted")
 		}
+	}
+}
+
+func TestCanonicalMulticallOffsets(t *testing.T) {
+	method := methods["multicall"]
+	args, err := method.Inputs.Pack([][]byte{{1}, {2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !canonicalBytesArray(args) {
+		t.Fatal("canonical offsets rejected")
+	}
+	args[95]++
+	call := Call{Data: "0x" + hex.EncodeToString(method.ID) + hex.EncodeToString(args)}
+	if _, ok := decode(method, call, "", false); ok {
+		t.Fatal("noncanonical offset accepted")
 	}
 }
 

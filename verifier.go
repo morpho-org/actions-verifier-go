@@ -3,6 +3,7 @@ package verifier
 import (
 	"bytes"
 	_ "embed"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
@@ -246,6 +247,9 @@ func decode(method abi.Method, call Call, origin string, final bool) (map[string
 		}
 		args = args[:len(args)-suffix]
 	}
+	if len(method.Inputs) == 1 && method.Inputs[0].Type.String() == "bytes[]" && !canonicalBytesArray(args) {
+		return nil, false
+	}
 	values, err := method.Inputs.Unpack(args)
 	if err != nil {
 		return nil, false
@@ -259,6 +263,37 @@ func decode(method abi.Method, call Call, origin string, final bool) (map[string
 		result[arg.Name] = values[i]
 	}
 	return result, true
+}
+
+func canonicalBytesArray(args []byte) bool {
+	word := func(b []byte) uint64 {
+		var zero [24]byte
+		if !bytes.Equal(b[:24], zero[:]) {
+			return ^uint64(0)
+		}
+		return binary.BigEndian.Uint64(b[24:32])
+	}
+	if len(args) < 64 || word(args) != 32 {
+		return false
+	}
+	count := word(args[32:])
+	items := args[64:]
+	if count > uint64(len(items)/32) {
+		return false
+	}
+	end := int(count) * 32
+	for i := 0; i < int(count)*32; i += 32 {
+		if word(items[i:]) != uint64(end) || len(items)-end < 32 {
+			return false
+		}
+		size := word(items[end:])
+		end += 32
+		if size > uint64(len(items)-end) {
+			return false
+		}
+		end += (int(size) + 31) &^ 31
+	}
+	return end == len(items)
 }
 
 func number(v any) *big.Int {
