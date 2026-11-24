@@ -185,24 +185,45 @@ func TestCanonicalTupleOffsets(t *testing.T) {
 
 func FuzzVerify(f *testing.F) {
 	var fixtures []fixture
-	for _, file := range []string{"blue_vault.json", "midnight.json"} {
+	for _, file := range []string{"blue_vault.json", "midnight.json", "blue_repay.json"} {
 		for _, seed := range loadFixtures(f, file) {
-			data, ok := hexBytes(seed.Calls[len(seed.Calls)-1].Data, -1)
-			if !ok {
-				f.Fatal("invalid fixture calldata")
+			for i, call := range seed.Calls {
+				data, ok := hexBytes(call.Data, -1)
+				if !ok {
+					f.Fatal("invalid fixture calldata")
+				}
+				f.Add(len(fixtures), i, data)
 			}
-			f.Add(len(fixtures), data)
 			fixtures = append(fixtures, seed)
 		}
 	}
-	f.Fuzz(func(t *testing.T, index int, data []byte) {
+	f.Fuzz(func(t *testing.T, index, callIndex int, data []byte) {
 		if index < 0 || index >= len(fixtures) || len(data) > 1<<20 {
 			return
 		}
 		seed := fixtures[index]
+		if callIndex < 0 || callIndex >= len(seed.Calls) {
+			return
+		}
 		calls := slices.Clone(seed.Calls)
-		calls[len(calls)-1].Data = "0x" + hex.EncodeToString(data)
+		calls[callIndex].Data = "0x" + hex.EncodeToString(data)
 		Verify(seed.Intent, calls)
+	})
+}
+
+func FuzzVerifyIntent(f *testing.F) {
+	var fixtures []fixture
+	for _, file := range []string{"blue_vault.json", "midnight.json", "blue_repay.json"} {
+		for _, seed := range loadFixtures(f, file) {
+			f.Add(len(fixtures), seed.Intent.Path, []byte(seed.Intent.Body))
+			fixtures = append(fixtures, seed)
+		}
+	}
+	f.Fuzz(func(t *testing.T, index int, path string, body []byte) {
+		if index < 0 || index >= len(fixtures) {
+			return
+		}
+		Verify(Intent{Path: path, Body: body}, fixtures[index].Calls)
 	})
 }
 
