@@ -86,6 +86,8 @@ publications can omit the token identity from the main call. An optional
 single approval must target an unpinned token and match the loan token if
 the intent supplies it. It must approve Midnight as spender, either up to
 the requested amount or for the SDK's unlimited allowance (`maxUint256`).
+If the intent omits the loan token, the response supplies the token address;
+a passing check does not establish that it is the intended loan token.
 For Midnight fills, callback and ratifier data, counterparty validity, and
 relative quote guards are not verified. An optional market or maker on a
 group take is checked when supplied; otherwise the group is checked but the

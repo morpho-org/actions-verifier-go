@@ -44,18 +44,32 @@ func TestMidnightWalletOfferApproval(t *testing.T) {
 			continue
 		}
 		token := "0x" + strings.Repeat("12", 20)
+		bound := f.Intent
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(bound.Body, &fields); err != nil {
+			t.Fatal(err)
+		}
+		fields["market_params"] = json.RawMessage(`[{"loan_token":"` + token + `"}]`)
+		var err error
+		bound.Body, err = json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, c := range []struct {
 			name, token string
 			spender     common.Address
 			amount      *big.Int
+			intent      Intent
 			valid       bool
 		}{
-			{"bounded", token, chain.Midnight, big.NewInt(5), true},
-			{"over intent", token, chain.Midnight, big.NewInt(6), false},
-			{"unlimited", token, chain.Midnight, maxUint256, true},
-			{"unlimited wrong spender", token, chain.MidnightBundlesV2, maxUint256, false},
-			{"unlimited pinned token", chain.Midnight.Hex(), chain.Midnight, maxUint256, false},
-			{"pinned", chain.Midnight.Hex(), chain.Midnight, big.NewInt(5), false},
+			{"bounded", token, chain.Midnight, big.NewInt(5), f.Intent, true},
+			{"over intent", token, chain.Midnight, big.NewInt(6), f.Intent, false},
+			{"unlimited", token, chain.Midnight, maxUint256, f.Intent, true},
+			{"unlimited bound token", token, chain.Midnight, maxUint256, bound, true},
+			{"unlimited wrong loan token", "0x" + strings.Repeat("13", 20), chain.Midnight, maxUint256, bound, false},
+			{"unlimited wrong spender", token, chain.MidnightBundlesV2, maxUint256, f.Intent, false},
+			{"unlimited pinned token", chain.Midnight.Hex(), chain.Midnight, maxUint256, f.Intent, false},
+			{"pinned", chain.Midnight.Hex(), chain.Midnight, big.NewInt(5), f.Intent, false},
 		} {
 			t.Run(c.name, func(t *testing.T) {
 				method := methods["approve"]
@@ -65,7 +79,7 @@ func TestMidnightWalletOfferApproval(t *testing.T) {
 				}
 				calldata := "0x" + hex.EncodeToString(slices.Concat(method.ID, args))
 				leading := Call{ID: "call_21", Kind: "approval", To: c.token, Data: calldata, Value: "0"}
-				if result := Verify(f.Intent, append([]Call{leading}, f.Calls...)); result != c.valid {
+				if result := Verify(c.intent, append([]Call{leading}, f.Calls...)); result != c.valid {
 					t.Errorf("Verify = %t; want %t", result, c.valid)
 				}
 			})
