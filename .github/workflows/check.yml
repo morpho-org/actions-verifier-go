@@ -21,12 +21,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        if: hashFiles('go.mod') != ''
         with:
           go-version-file: go.mod
           cache: false
       - name: Format, verify and lint the Go module
-        if: hashFiles('go.mod') != ''
         run: |
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then
@@ -39,7 +37,6 @@ jobs:
           go vet ./...
           go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
       - name: Scan reachable Go vulnerabilities
-        if: hashFiles('go.mod') != ''
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
   test:
@@ -62,13 +59,14 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+      - name: Require the root Go module
+        run: test -f go.mod
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        if: hashFiles('go.mod') != ''
         with:
           go-version: ${{ matrix.go-version }}
           cache: false
       - name: Verify the declared minimum Go version
-        if: matrix.minimum && hashFiles('go.mod') != ''
+        if: matrix.minimum
         env:
           MINIMUM_GO: ${{ matrix.go-version }}
         run: |
@@ -79,7 +77,6 @@ jobs:
           fi
       - name: Run Go race tests
         id: race
-        if: hashFiles('go.mod') != ''
         run: |
           go test -race ./...
           printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
