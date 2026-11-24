@@ -33,6 +33,7 @@ jobs:
             printf 'Run gofmt on:\n%s\n' "$unformatted"
             exit 1
           fi
+          go mod download
           go mod verify
           go mod tidy -diff
           go vet ./...
