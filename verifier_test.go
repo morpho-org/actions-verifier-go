@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -13,7 +14,7 @@ type fixture struct {
 	Calls  []Call `json:"calls"`
 }
 
-func loadFixtures(t *testing.T, file string) []fixture {
+func loadFixtures(t testing.TB, file string) []fixture {
 	t.Helper()
 	data, err := os.ReadFile("testdata/" + file)
 	if err != nil {
@@ -119,7 +120,7 @@ func TestCanonicalMulticallOffsets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !canonicalBytesArray(args) {
+	if !canonicalABILayout(method.Inputs, args) {
 		t.Fatal("canonical offsets rejected")
 	}
 	args[95]++
@@ -127,6 +128,48 @@ func TestCanonicalMulticallOffsets(t *testing.T) {
 	if _, ok := decode(method, call, "", false); ok {
 		t.Fatal("noncanonical offset accepted")
 	}
+}
+
+func TestCanonicalTupleOffsets(t *testing.T) {
+	method := midnightMethods[buyAssets]
+	for _, f := range loadFixtures(t, "midnight.json") {
+		if !strings.Contains(f.Intent.Path, "/markets/") || !strings.HasSuffix(f.Intent.Path, "/lend") {
+			continue
+		}
+		data, ok := hexBytes(f.Calls[len(f.Calls)-1].Data, -1)
+		if !ok || !canonicalABILayout(method.Inputs, data[4:]) {
+			t.Fatal("canonical tuple layout rejected")
+		}
+		data[35] |= 1
+		if canonicalABILayout(method.Inputs, data[4:]) {
+			t.Fatal("misaligned tuple offset accepted")
+		}
+		return
+	}
+	t.Fatal("Midnight market lend fixture missing")
+}
+
+func FuzzVerify(f *testing.F) {
+	var fixtures []fixture
+	for _, file := range []string{"blue_vault.json", "midnight.json"} {
+		for _, seed := range loadFixtures(f, file) {
+			data, ok := hexBytes(seed.Calls[len(seed.Calls)-1].Data, -1)
+			if !ok {
+				f.Fatal("invalid fixture calldata")
+			}
+			f.Add(len(fixtures), data)
+			fixtures = append(fixtures, seed)
+		}
+	}
+	f.Fuzz(func(t *testing.T, index int, data []byte) {
+		if index < 0 || index >= len(fixtures) || len(data) > 1<<20 {
+			return
+		}
+		seed := fixtures[index]
+		calls := slices.Clone(seed.Calls)
+		calls[len(calls)-1].Data = "0x" + hex.EncodeToString(data)
+		Verify(seed.Intent, calls)
+	})
 }
 
 func TestBlueRepayReferenceCalls(t *testing.T) {
