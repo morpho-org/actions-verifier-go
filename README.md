@@ -40,8 +40,9 @@ flowchart TD
    show the calls for review. If approved, sign and send them in order
    from the requested account on the requested chain. Wait for each transaction
    to confirm with a successful receipt before sending the next. Alternatively,
-   use EIP-5792 `wallet_sendCalls` if the wallet supports atomic batching on that
-   chain. Call entries do not encode the transaction sender or chain.
+   use EIP-5792 `wallet_sendCalls` with `atomicRequired: true` if the wallet
+   supports atomic batching on that chain. Call entries do not encode the
+   transaction sender or chain.
 
 ```go
 package integration
