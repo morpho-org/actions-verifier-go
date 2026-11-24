@@ -391,7 +391,7 @@ func prerequisites(calls []Call, chain deployment, bundle, token common.Address,
 			}
 			if token == zeroAddress {
 				if approvals != 1 || callTo(call, bundle) || chain.pinned(common.HexToAddress(call.To)) ||
-					n.Sign() <= 0 || n.Cmp(maximum) > 0 || n.Cmp(maxUint256) == 0 || n.Cmp(maxUint96) == 0 {
+					n.Sign() <= 0 || (n.Cmp(maxUint256) != 0 && (n.Cmp(maximum) > 0 || n.Cmp(maxUint96) == 0)) {
 					return false
 				}
 				continue

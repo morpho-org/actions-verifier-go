@@ -62,6 +62,19 @@ func TestVaultDepositApproval(t *testing.T) {
 			continue
 		}
 		approval, main := f.Calls[0], f.Calls[1]
+		unlimited := approval
+		unlimited.Data = approval.Data[:74] + strings.Repeat("ff", 32)
+		t.Run(main.Kind+"/unlimited", func(t *testing.T) {
+			if !Verify(f.Intent, []Call{unlimited, main}) {
+				t.Fatal("SDK max approval rejected")
+			}
+		})
+		wrongSpender := unlimited
+		wrongSpender.Data = unlimited.Data[:10] + strings.Repeat("0", 64) + unlimited.Data[74:]
+		pinnedToken := unlimited
+		pinnedToken.To = main.To
+		overIntent := unlimited
+		overIntent.Data = unlimited.Data[:136] + "fe"
 		for _, tt := range []struct {
 			name  string
 			calls []Call
@@ -69,7 +82,9 @@ func TestVaultDepositApproval(t *testing.T) {
 			{"reversed", []Call{main, approval}},
 			{"duplicate", []Call{approval, {ID: "call_2", Kind: approval.Kind, To: approval.To, Data: approval.Data, Value: approval.Value}, main}},
 			{"pinned-token", []Call{{ID: approval.ID, Kind: approval.Kind, To: main.To, Data: approval.Data, Value: approval.Value}, main}},
-			{"unlimited", []Call{{ID: approval.ID, Kind: approval.Kind, To: approval.To, Data: approval.Data[:74] + strings.Repeat("ff", 32), Value: approval.Value}, main}},
+			{"unlimited-wrong-spender", []Call{wrongSpender, main}},
+			{"unlimited-pinned-token", []Call{pinnedToken, main}},
+			{"over-intent", []Call{overIntent, main}},
 		} {
 			t.Run(main.Kind+"/"+tt.name, func(t *testing.T) {
 				if Verify(f.Intent, tt.calls) {

@@ -61,9 +61,10 @@ specified in the request is not authenticated.
 
 For vault deposits, the underlying ERC-20 is not identified by the request
 or the bundle arguments. If an approval is present, it must be the only
-approval, grant the pinned deposit bundle no more than the requested assets,
-not be unlimited, and not target a pinned Morpho contract or the intended
-vault. A passing check cannot identify the correct underlying token or
+approval, grant the pinned deposit bundle either at most the requested assets
+or the SDK's unlimited allowance (`maxUint256`), and not target a pinned
+Morpho contract or the intended vault. An unlimited approval can outlast the
+transaction. A passing check cannot identify the correct underlying token or
 tell whether an approval was required, so a deposit can also have no
 approval. Applications that need token identity must obtain it separately.
 Where the loan or collateral token is in market parameters that hash to
