@@ -79,6 +79,25 @@ the requested market ID, the approval target must match that token. Blue
 funding paths accept the SDK's persistent approvals to the pinned spender,
 as well as the approval amount derived from the verified call.
 
+For Midnight offer publication, the compressed payload is opaque. A passing
+check does not establish the published offer terms, tree root, validity
+period, or cap represented by the payload. Wallet-funded lend and repay
+publications can omit the token identity from the main call. An optional
+single approval must target an unpinned token and match the loan token if
+the intent supplies it. It must approve Midnight as spender, either up to
+the requested amount or for the SDK's unlimited allowance (`maxUint256`).
+If the intent omits the loan token, the response supplies the token address;
+a passing check does not establish that it is the intended loan token.
+For Midnight fills, callback and ratifier data, counterparty validity, and
+relative quote guards are not verified. An optional market or maker on a
+group take is checked when supplied; otherwise the group is checked but the
+market and maker cannot independently be identified from the request. Without
+an absolute guard that binds the take direction, the verifier checks the
+response's direction for internal consistency but cannot authenticate it.
+Cancellation and funding withdrawal have no onchain deadline. The verifier
+cannot establish that a funding address belongs to the account, or that the
+funding shares in the call are the full position.
+
 ## Supported route families
 
 | Family | Actions |
@@ -86,6 +105,9 @@ as well as the approval amount derived from the verified call.
 | Blue | borrow, refinance, repay, supply, supply-collateral, withdraw, withdraw-collateral |
 | Vault V1 | deposit, withdraw |
 | Vault V2 | deposit, force-withdraw, redeem-in-kind, withdraw |
+| Midnight markets | borrow, lend, repay, supply-collateral, withdraw, withdraw-collateral |
+| Midnight offer groups | take |
+| Midnight offers | borrow, cancel, funding/withdraw, lend, repay, withdraw |
 
 The per-chain pins are in [chains_blue_vault.json](chains_blue_vault.json).
 A family needs its corresponding bundle address on that chain. Vault V2
@@ -94,7 +116,30 @@ deployment addresses and ABI fragments are derived from the Morpho Actions
 registries; the verifier checks the pinned selector against each ABI
 signature at initialization.
 
+Midnight deployment pins are in [chains_midnight.json](chains_midnight.json)
+(chains 1, 4663, 5042, and 8453). Midnight market IDs are derived from the
+ABI-encoded market and its pinned deployment, not from a Blue market hash.
+
 ```sh
 go vet ./...
 go test -race ./...
 ```
+
+## Test against a live Actions API
+
+The live test is off by default. Create a JSON array of intents (each with
+`path` and `body`, as above) using markets, accounts and positions that can
+exercise each route on your chosen chains. Set `ACTIONS_API_KEY` in your
+environment from your secret store; do not put it in the intents file.
+
+```sh
+ACTIONS_API_URL=https://private.api.morpho.org \
+  ACTIONS_API_CASES=/path/to/cases.json \
+  go test -run '^TestLiveActions$' -count=1 -v
+```
+
+For a local Actions API use its loopback URL and omit the key if it is not
+required. The test sends only preparation requests. It does not sign or
+broadcast transactions, save responses, or print headers. A non-prepared
+response is reported separately from a prepared response rejected by
+`Verify`; an authentication failure stops further requests to that host.
