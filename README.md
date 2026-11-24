@@ -23,7 +23,7 @@ flowchart TD
     B --> C["Get prepared calls"]
     C --> D{"Verify(intent, calls)"}
     D -->|true| E["Check simulation and proof"]
-    E --> G["Review, then sign and send in order"]
+    E --> G["Review, then sign and send in order; wait for each successful receipt"]
     D -->|false| F["Stop; do not sign"]
 ```
 
@@ -38,8 +38,10 @@ flowchart TD
    do not sign or send transaction calls.
 4. After verification and the API's separate simulation and proof checks,
    show the calls for review. If approved, sign and send them in order
-   from the requested account on the requested chain. Call entries do not
-   encode the transaction sender or chain.
+   from the requested account on the requested chain. Wait for each transaction
+   to confirm with a successful receipt before sending the next. Alternatively,
+   use EIP-5792 `wallet_sendCalls` if the wallet supports atomic batching on that
+   chain. Call entries do not encode the transaction sender or chain.
 
 ```go
 package integration
