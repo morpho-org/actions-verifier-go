@@ -61,6 +61,7 @@ var maxUint96 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 96), big.NewInt
 
 func loadABI(source []byte) map[string]abi.Method {
 	var entries []struct {
+		Key      string
 		Selector string
 		Method   json.RawMessage
 	}
@@ -76,6 +77,9 @@ func loadABI(source []byte) map[string]abi.Method {
 		for name, method := range parsed.Methods {
 			if "0x"+hex.EncodeToString(method.ID) != entry.Selector {
 				panic("selector mismatch: " + name)
+			}
+			if entry.Key != "" {
+				name = entry.Key
 			}
 			methods[name] = method
 		}
@@ -101,15 +105,41 @@ type amount struct {
 }
 
 type request struct {
-	Account     string `json:"account"`
-	ChainID     uint64 `json:"chain_id"`
-	Amount      amount `json:"amount"`
-	Collateral  amount `json:"collateral_amount"`
-	Destination string `json:"destination_market"`
-	Market      string `json:"market"`
-	Expires     uint64 `json:"expires_at"`
-	Origin      string `json:"calldata_origin"`
-	Funding     struct {
+	Account         string `json:"account"`
+	ChainID         uint64 `json:"chain_id"`
+	Amount          amount `json:"amount"`
+	Collateral      amount `json:"collateral_amount"`
+	Destination     string `json:"destination_market"`
+	Market          string `json:"market"`
+	MidnightID      string `json:"market_id"`
+	CollateralToken struct {
+		Address string `json:"address"`
+	} `json:"collateral"`
+	Supplies    []collateralChange `json:"collateral_supplies"`
+	Withdrawals []collateralChange `json:"collateral_withdrawals"`
+	Maker       string             `json:"maker"`
+	Groups      []string           `json:"groups"`
+	Type        string             `json:"type"`
+	Guard       struct {
+		Type  string `json:"type"`
+		Value string `json:"value"`
+	} `json:"guard"`
+	FundingAddress string          `json:"funding_address"`
+	FundingMarket  string          `json:"funding_market"`
+	MarketParams   json.RawMessage `json:"market_params"`
+	FundingSource  struct {
+		Type   string `json:"type"`
+		Market string `json:"market_id"`
+	} `json:"funding_source"`
+	Offers struct {
+		Type    string `json:"type"`
+		Entries []struct {
+			Market string `json:"market_id"`
+		} `json:"entries"`
+	} `json:"offers"`
+	Expires uint64 `json:"expires_at"`
+	Origin  string `json:"calldata_origin"`
+	Funding struct {
 		Type      string `json:"type"`
 		MaxNative string `json:"max_native_assets"`
 	} `json:"funding"`
@@ -136,16 +166,19 @@ func check(intent Intent, calls []Call) bool {
 	if !ok {
 		return false
 	}
-	chain, ok := chains[r.chain]
-	if !ok {
-		return false
-	}
 	ids := make(map[string]bool, len(calls))
 	for _, call := range calls {
 		if !validCall(call) || ids[call.ID] {
 			return false
 		}
 		ids[call.ID] = true
+	}
+	if strings.HasPrefix(r.family, "midnight/") {
+		return verifyMidnight(r, body, calls)
+	}
+	chain, ok := chains[r.chain]
+	if !ok {
+		return false
 	}
 	switch r.family {
 	case "blue":
@@ -163,6 +196,30 @@ func parseRoute(path string, bodyChain uint64) (route, bool) {
 	}
 	r := route{family: parts[0]}
 	switch r.family {
+	case "midnight":
+		r.family += "/" + parts[1]
+		switch parts[1] {
+		case "markets", "offer-groups":
+			if len(parts) != 4 {
+				return route{}, false
+			}
+			r.chain, r.selector = splitSelector(parts[2])
+			if _, ok := hexBytes(r.selector, 32); !ok {
+				return route{}, false
+			}
+			r.action = parts[3]
+		case "offers":
+			r.chain = bodyChain
+			if len(parts) == 3 {
+				r.action = parts[2]
+			} else if len(parts) == 4 && parts[2] == "funding" && parts[3] == "withdraw" {
+				r.action = "funding/withdraw"
+			} else {
+				return route{}, false
+			}
+		default:
+			return route{}, false
+		}
 	case "blue":
 		if len(parts) != 4 || parts[1] != "markets" {
 			return route{}, false
@@ -426,6 +483,7 @@ func prerequisites(calls []Call, chain deployment, bundle, token common.Address,
 			}
 			if token == zeroAddress {
 				if approvals != 1 || callTo(call, bundle) || chain.pinned(common.HexToAddress(call.To)) ||
+					midnightChains[chain.ID].pinned(common.HexToAddress(call.To)) ||
 					n.Sign() <= 0 || (n.Cmp(maxUint256) != 0 && (n.Cmp(maximum) > 0 || n.Cmp(maxUint96) == 0)) {
 					return false
 				}
