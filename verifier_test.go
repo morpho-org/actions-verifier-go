@@ -158,10 +158,26 @@ func TestCanonicalTupleOffsets(t *testing.T) {
 		if !ok || !canonicalABILayout(method.Inputs, data[4:]) {
 			t.Fatal("canonical tuple layout rejected")
 		}
-		data[35] |= 1
-		if canonicalABILayout(method.Inputs, data[4:]) {
-			t.Fatal("misaligned tuple offset accepted")
-		}
+		args := data[4:]
+		t.Run("outer", func(t *testing.T) {
+			mutated := slices.Clone(args)
+			mutated[abiWordSize-1] |= 1
+			if canonicalABILayout(method.Inputs, mutated) {
+				t.Fatal("misaligned tuple offset accepted")
+			}
+		})
+		t.Run("inner", func(t *testing.T) {
+			tupleOffset, ok := abiIndex(args)
+			if !ok {
+				t.Fatal("missing market tuple offset")
+			}
+			const collateralParamsOffsetWord = 3
+			mutated := slices.Clone(args)
+			mutated[tupleOffset+(collateralParamsOffsetWord+1)*abiWordSize-1] |= 1
+			if canonicalABILayout(method.Inputs, mutated) {
+				t.Fatal("misaligned collateralParams offset inside market tuple accepted")
+			}
+		})
 		return
 	}
 	t.Fatal("Midnight market lend fixture missing")
