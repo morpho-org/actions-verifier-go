@@ -12,6 +12,8 @@ Once the module is published:
 go get github.com/morpho-org/actions-verifier-go
 ```
 
+The import path provides package `verifier`.
+
 ```go
 import (
     "encoding/json"
@@ -115,7 +117,10 @@ A family needs its corresponding bundle address on that chain. Vault V2
 force-withdraw and redeem-in-kind require a Vault Exit deployment. The
 deployment addresses and ABI fragments are derived from the Morpho Actions
 registries; the verifier checks the pinned selector against each ABI
-signature at initialization.
+signature at initialization. Argument names and tuple field names are also
+part of the verifier's schema contract, even though they do not affect the
+selector. When updating an ABI, check those names against the verifier and
+run the route fixtures.
 
 Midnight deployment pins are in [chains_midnight.json](chains_midnight.json)
 (chains 1, 4663, 5042, and 8453). Midnight market IDs are derived from the

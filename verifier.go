@@ -14,24 +14,37 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// Intent wraps the original JSON request body and the concrete Actions API
-// path, including the chain-qualified selector where the route uses one.
+// Intent is the trusted request as originally sent to the Actions API.
 type Intent struct {
-	Path string          `json:"path"`
+	// Path is the concrete endpoint path, including the chain-qualified selector
+	// where required, not a route template or a full URL.
+	Path string `json:"path"`
+	// Body is the original JSON body, not the token and signatures sent to
+	// continue an action. Keep it independently of the API's response.
 	Body json.RawMessage `json:"body"`
 }
 
 // Call is an entry in the API's ordered data.calls list.
 type Call struct {
-	ID    string `json:"id"`
-	Kind  string `json:"kind"`
-	To    string `json:"to"`
-	Data  string `json:"data"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	To   string `json:"to"`
+	// Data is 0x-prefixed hexadecimal calldata.
+	Data string `json:"data"`
+	// Value is an unsigned decimal string in wei, including "0" for no value.
 	Value string `json:"value"`
 }
 
-// Verify reports whether calls pass the supported offline intent checks.
-// The caller must send from the account and chain in the original intent.
+// Verify reports whether calls pass the supported structural checks against
+// intent. Check that the API returned status "prepared", then pass its entire
+// data.calls list in order. Unsupported routes, chains and call shapes return
+// false. Verify rejects more than 128 calls, request bodies over 1 MiB, and
+// hexadecimal calldata strings over 2 MiB per call.
+//
+// Verify is synchronous and does not perform I/O or modify its inputs. It can
+// be called concurrently if callers do not mutate shared input memory.
+// A true result does not establish execution success; see the package
+// documentation for what remains the caller's responsibility.
 func Verify(intent Intent, calls []Call) bool {
 	return check(intent, calls)
 }
