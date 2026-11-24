@@ -44,16 +44,33 @@ func TestMidnightWalletOfferApproval(t *testing.T) {
 			continue
 		}
 		token := "0x" + strings.Repeat("12", 20)
-		bound := f.Intent
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(bound.Body, &fields); err != nil {
-			t.Fatal(err)
-		}
-		fields["market_params"] = json.RawMessage(`[{"loan_token":"` + token + `"}]`)
-		var err error
-		bound.Body, err = json.Marshal(fields)
-		if err != nil {
-			t.Fatal(err)
+		walletLend := Intent{
+			Path: "/v0/actions/midnight/offers/lend",
+			Body: json.RawMessage(`{
+				"account": "0xabababababababababababababababababababab",
+				"chain_id": 1,
+				"amount": {"unit": "assets", "value": "5"},
+				"funding_source": {"type": "wallet"},
+				"offers": {"type": "price", "entries": [{
+					"market_id": "0x491551ab0ed8472b2267b6eda7e1b953d2a1d6a98cfc85df1feadc62f01e450d",
+					"tick": "100",
+					"starts_at": 1800000000,
+					"expires_at": 1900000000
+				}]},
+				"market_params": [{
+					"loan_token": "0x1212121212121212121212121212121212121212",
+					"maturity": 2000000000,
+					"rcf_threshold": "0",
+					"enter_gate": "0x0000000000000000000000000000000000000000",
+					"liquidator_gate": "0x0000000000000000000000000000000000000000",
+					"collaterals": [{
+						"token": "0x3434343434343434343434343434343434343434",
+						"lltv": "800000000000000000",
+						"liquidation_cursor": "0",
+						"oracle": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+					}]
+				}]
+			}`),
 		}
 		for _, c := range []struct {
 			name, token string
@@ -65,8 +82,8 @@ func TestMidnightWalletOfferApproval(t *testing.T) {
 			{"bounded", token, chain.Midnight, big.NewInt(5), f.Intent, true},
 			{"over intent", token, chain.Midnight, big.NewInt(6), f.Intent, false},
 			{"unlimited", token, chain.Midnight, maxUint256, f.Intent, true},
-			{"unlimited bound token", token, chain.Midnight, maxUint256, bound, true},
-			{"unlimited wrong loan token", "0x" + strings.Repeat("13", 20), chain.Midnight, maxUint256, bound, false},
+			{"wallet lend unlimited bound token", token, chain.Midnight, maxUint256, walletLend, true},
+			{"wallet lend unlimited wrong loan token", "0x" + strings.Repeat("13", 20), chain.Midnight, maxUint256, walletLend, false},
 			{"unlimited wrong spender", token, chain.MidnightBundlesV2, maxUint256, f.Intent, false},
 			{"unlimited pinned token", chain.Midnight.Hex(), chain.Midnight, maxUint256, f.Intent, false},
 			{"pinned", chain.Midnight.Hex(), chain.Midnight, big.NewInt(5), f.Intent, false},
