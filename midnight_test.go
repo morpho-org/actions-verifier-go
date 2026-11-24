@@ -144,6 +144,34 @@ func TestWalletLoanTokenBinding(t *testing.T) {
 	}
 }
 
+func TestMidnightRatifierPins(t *testing.T) {
+	base := midnightChains[8453]
+	for _, c := range []struct {
+		typ, address string
+	}{
+		{"rate", "0x3B2FbA901C88f026BF50A12c8B28484Cd81F9526"},
+		{"rate", "0x39c01afA4B3f827a0bfAa39cDC4610111f80BABc"},
+		{"price", "0x8e38421bC293339798e9bD0c0a51690675D2f94b"},
+	} {
+		t.Run(c.address, func(t *testing.T) {
+			addr := common.HexToAddress(c.address)
+			if !midnightRatifier(base, c.typ, addr) || !base.pinned(addr) {
+				t.Fatal("Base ratifier pin missing")
+			}
+			if midnightChains[1].pinned(addr) {
+				t.Fatal("Base ratifier accepted on Ethereum")
+			}
+			wrongType := "rate"
+			if c.typ == "rate" {
+				wrongType = "price"
+			}
+			if midnightRatifier(base, wrongType, addr) {
+				t.Fatal("ratifier accepted for wrong offer type")
+			}
+		})
+	}
+}
+
 func TestMidnightIntentBindings(t *testing.T) {
 	for _, f := range loadFixtures(t, "midnight.json") {
 		var fields map[string]json.RawMessage

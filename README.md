@@ -91,7 +91,9 @@ a passing check does not establish that it is the intended loan token.
 For Midnight fills, callback and ratifier data, counterparty validity, and
 relative quote guards are not verified. An optional market or maker on a
 group take is checked when supplied; otherwise the group is checked but the
-market and maker cannot independently be identified from the request.
+market and maker cannot independently be identified from the request. Without
+an absolute guard that binds the take direction, the verifier checks the
+response's direction for internal consistency but cannot authenticate it.
 Cancellation and funding withdrawal have no onchain deadline. The verifier
 cannot establish that a funding address belongs to the account, or that the
 funding shares in the call are the full position.
