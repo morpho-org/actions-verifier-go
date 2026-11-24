@@ -188,7 +188,7 @@ func parseRoute(path string, bodyChain uint64) (route, bool) {
 }
 
 func splitSelector(selector string) (uint64, string) {
-	raw, value, ok := strings.Cut(strings.ReplaceAll(selector, "%3A", ":"), ":")
+	raw, value, ok := strings.Cut(strings.NewReplacer("%3A", ":", "%3a", ":").Replace(selector), ":")
 	chain, err := strconv.ParseUint(raw, 10, 53)
 	if !ok || err != nil || strconv.FormatUint(chain, 10) != raw {
 		return 0, ""

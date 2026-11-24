@@ -35,6 +35,11 @@ func TestBlueAndVaultRoutes(t *testing.T) {
 			if !Verify(f.Intent, f.Calls) {
 				t.Fatal("valid response rejected")
 			}
+			escaped := f.Intent
+			escaped.Path = strings.Replace(escaped.Path, ":", "%3a", 1)
+			if !Verify(escaped, f.Calls) {
+				t.Fatal("lowercase percent-encoded route separator rejected")
+			}
 			for _, mutate := range []struct {
 				name string
 				edit func(*Call)
