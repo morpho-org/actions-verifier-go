@@ -390,7 +390,6 @@ func midnightFunding(chain midnightDeployment, body request, call Call, a map[st
 	if body.Funding.Type != "auto" && (body.Funding.Type != "native" || cap.Cmp(actual) != 0) {
 		return false
 	}
-	caps[token] = new(big.Int).Sub(cap, actual)
 	return true
 }
 

@@ -75,6 +75,38 @@ func TestMidnightWalletOfferApproval(t *testing.T) {
 	t.Fatal("wallet repay fixture missing")
 }
 
+func TestMidnightNativeFundingApproval(t *testing.T) {
+	chain := midnightChains[1]
+	var body request
+	for _, mode := range []struct {
+		name, value string
+	}{
+		{"auto", "2"},
+		{"native", "5"},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			body.Funding.Type = mode.name
+			body.Funding.MaxNative = "5"
+			caps := map[common.Address]*big.Int{chain.WrappedNative: big.NewInt(5)}
+			wrapped := map[string]any{"wrappedNative": chain.WrappedNative}
+			if !midnightFunding(chain, body, Call{Value: mode.value}, wrapped, caps) {
+				t.Fatal("valid native funding rejected")
+			}
+			for _, amount := range []*big.Int{big.NewInt(5), maxUint256} {
+				m := methods["approve"]
+				data, err := m.Inputs.Pack(chain.MidnightBundlesV2, amount)
+				if err != nil {
+					t.Fatal(err)
+				}
+				call := Call{Kind: "approval", To: chain.WrappedNative.Hex(), Data: "0x" + hex.EncodeToString(slices.Concat(m.ID, data)), Value: "0"}
+				if !midnightPrereqs(chain, body, []Call{call}, chain.MidnightBundlesV2, caps) {
+					t.Fatalf("approval %s rejected for full wrapped-native pull", amount)
+				}
+			}
+		})
+	}
+}
+
 func TestMidnightCancelRejectsUnknownInnerSelector(t *testing.T) {
 	for _, f := range loadFixtures(t, "midnight.json") {
 		if !strings.HasSuffix(f.Intent.Path, "/offers/cancel") {
