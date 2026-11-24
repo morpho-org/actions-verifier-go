@@ -17,27 +17,27 @@ func verifyBlue(r route, chain deployment, body request, calls []Call) bool {
 	marketArg := "marketParams"
 	switch r.action {
 	case "supply":
-		method, kind = "blueBundlesV1Supply", "blueSupply"
+		method, kind = "blueBundlesV1Supply", "blue_supply"
 	case "withdraw":
-		method, kind, allowAuth = "blueBundlesV1Withdraw", "blueWithdraw", true
+		method, kind, allowAuth = "blueBundlesV1Withdraw", "blue_withdraw", true
 	case "borrow", "supply-collateral":
-		method, kind = "blueBundlesV1SupplyCollateralAndBorrow", "blueBorrow"
+		method, kind = "blueBundlesV1SupplyCollateralAndBorrow", "blue_borrow"
 		allowAuth = r.action == "borrow"
 		if r.action == "supply-collateral" {
-			kind = "blueSupplyCollateral"
+			kind = "blue_supply_collateral"
 		} else if body.Collateral.Unit != "" {
-			kind = "blueSupplyCollateralBorrow"
+			kind = "blue_supply_collateral_borrow"
 		}
 	case "repay", "withdraw-collateral":
-		method, kind = "blueBundlesV1RepayAndWithdrawCollateral", "blueRepay"
+		method, kind = "blueBundlesV1RepayAndWithdrawCollateral", "blue_repay"
 		allowAuth = r.action == "withdraw-collateral" || body.Collateral.Unit != ""
 		if r.action == "withdraw-collateral" {
-			kind = "blueWithdrawCollateral"
+			kind = "blue_withdraw_collateral"
 		} else if body.Collateral.Unit != "" {
-			kind = "blueRepayWithdrawCollateral"
+			kind = "blue_repay_withdraw_collateral"
 		}
 	case "refinance":
-		method, kind, marketArg, allowAuth = "blueBundlesV1MigrateBorrowPosition", "blueRefinance", "sourceMarketParams", true
+		method, kind, marketArg, allowAuth = "blueBundlesV1MigrateBorrowPosition", "blue_refinance", "sourceMarketParams", true
 	default:
 		return false
 	}

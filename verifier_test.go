@@ -82,7 +82,7 @@ func TestVaultDepositApproval(t *testing.T) {
 
 func TestVaultForceRedeemReceiver(t *testing.T) {
 	for _, f := range loadFixtures(t, "blue_vault.json") {
-		if f.Calls[0].Kind != "vaultV2ForceRedeem" {
+		if f.Calls[0].Kind != "vault_v2_force_redeem" {
 			continue
 		}
 		f.Intent.Body = json.RawMessage(strings.Replace(string(f.Intent.Body), "0000000000000000000000000000000000000001", "0000000000000000000000000000000000000009", 1))

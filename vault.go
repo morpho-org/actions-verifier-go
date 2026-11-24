@@ -12,20 +12,20 @@ func verifyVault(r route, chain deployment, body request, calls []Call) bool {
 	final := calls[len(calls)-1]
 	vault := common.HexToAddress(r.selector)
 	bundle := chain.VaultV1Bundle
-	kindPrefix := "vaultV1"
+	kindPrefix := "vault_v1_"
 	if r.family == "vaults-v2" {
-		bundle, kindPrefix = chain.VaultV2Bundle, "vaultV2"
+		bundle, kindPrefix = chain.VaultV2Bundle, "vault_v2_"
 	}
 	var method, kind string
 	var cap *big.Int
 	token := vault
 	switch r.action {
 	case "deposit":
-		method, kind, token = "vaultBundlesV1Deposit", kindPrefix+"Deposit", zeroAddress
+		method, kind, token = "vaultBundlesV1Deposit", kindPrefix+"deposit", zeroAddress
 	case "withdraw":
-		method, kind = "vaultBundlesV1Withdraw", kindPrefix+"Withdraw"
+		method, kind = "vaultBundlesV1Withdraw", kindPrefix+"withdraw"
 		if body.Amount.Unit != "assets" {
-			kind = kindPrefix + "Redeem"
+			kind = kindPrefix + "redeem"
 		}
 	case "force-withdraw":
 		if r.family != "vaults-v2" || chain.VaultExit == zeroAddress {
@@ -34,12 +34,12 @@ func verifyVault(r route, chain deployment, body request, calls []Call) bool {
 		if body.Amount.Unit == "all" {
 			return len(calls) == 1 && verifyVaultMulticall(final, vault, body)
 		}
-		method, kind, bundle = "vaultExitBundlesV1ForceWithdrawVaultV2", "vaultV2ForceWithdraw", chain.VaultExit
+		method, kind, bundle = "vaultExitBundlesV1ForceWithdrawVaultV2", "vault_v2_force_withdraw", chain.VaultExit
 	case "redeem-in-kind":
 		if r.family != "vaults-v2" {
 			return false
 		}
-		method, kind, bundle = "vaultExitBundlesV1InKindRedemptionVaultV2", "vaultV2InKindRedeem", chain.VaultExit
+		method, kind, bundle = "vaultExitBundlesV1InKindRedemptionVaultV2", "vault_v2_in_kind_redeem", chain.VaultExit
 	default:
 		return false
 	}
@@ -95,7 +95,7 @@ func verifyVault(r route, chain deployment, body request, calls []Call) bool {
 }
 
 func verifyVaultMulticall(call Call, vault common.Address, body request) bool {
-	if body.Amount.Value != "" || call.Kind != "vaultV2ForceRedeem" || call.Value != "0" || !callTo(call, vault) {
+	if body.Amount.Value != "" || call.Kind != "vault_v2_force_redeem" || call.Value != "0" || !callTo(call, vault) {
 		return false
 	}
 	a, ok := decode(methods["multicall"], call, body.Origin, true)
