@@ -128,8 +128,8 @@ func midnightWalletOffer(chain midnightDeployment, body request, prereqs []Call,
 		a, ok := decode(methods["approve"], call, "", false)
 		n := number(a["amount"])
 		if !ok || call.Value != "0" || address(a["spender"]) != chain.Midnight ||
-			n == nil || n.Sign() <= 0 || n.Cmp(cap) > 0 || n.Cmp(maxUint256) == 0 ||
-			n.Cmp(maxUint96) == 0 || chains[chain.ID].pinned(token) ||
+			n == nil || n.Sign() <= 0 || (n.Cmp(maxUint256) != 0 && (n.Cmp(cap) > 0 || n.Cmp(maxUint96) == 0)) ||
+			chains[chain.ID].pinned(token) ||
 			chain.pinned(token) || !matchesWalletToken(body.MarketParams, token) {
 			return false
 		}

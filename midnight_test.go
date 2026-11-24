@@ -46,17 +46,20 @@ func TestMidnightWalletOfferApproval(t *testing.T) {
 		token := "0x" + strings.Repeat("12", 20)
 		for _, c := range []struct {
 			name, token string
+			spender     common.Address
 			amount      *big.Int
 			valid       bool
 		}{
-			{"bounded", token, big.NewInt(5), true},
-			{"over intent", token, big.NewInt(6), false},
-			{"unlimited", token, maxUint256, false},
-			{"pinned", chain.Midnight.Hex(), big.NewInt(5), false},
+			{"bounded", token, chain.Midnight, big.NewInt(5), true},
+			{"over intent", token, chain.Midnight, big.NewInt(6), false},
+			{"unlimited", token, chain.Midnight, maxUint256, true},
+			{"unlimited wrong spender", token, chain.MidnightBundlesV2, maxUint256, false},
+			{"unlimited pinned token", chain.Midnight.Hex(), chain.Midnight, maxUint256, false},
+			{"pinned", chain.Midnight.Hex(), chain.Midnight, big.NewInt(5), false},
 		} {
 			t.Run(c.name, func(t *testing.T) {
 				method := methods["approve"]
-				args, err := method.Inputs.Pack(chain.Midnight, c.amount)
+				args, err := method.Inputs.Pack(c.spender, c.amount)
 				if err != nil {
 					t.Fatal(err)
 				}

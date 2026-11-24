@@ -82,9 +82,10 @@ as well as the approval amount derived from the verified call.
 For Midnight offer publication, the compressed payload is opaque. A passing
 check does not establish the published offer terms, tree root, validity
 period, or cap represented by the payload. Wallet-funded lend and repay
-publications can omit the token identity from the main call. In that case,
-an optional single approval may target an unpinned token, must approve
-Midnight as spender, and cannot exceed the requested amount or be unlimited.
+publications can omit the token identity from the main call. An optional
+single approval must target an unpinned token and match the loan token if
+the intent supplies it. It must approve Midnight as spender, either up to
+the requested amount or for the SDK's unlimited allowance (`maxUint256`).
 For Midnight fills, callback and ratifier data, counterparty validity, and
 relative quote guards are not verified. An optional market or maker on a
 group take is checked when supplied; otherwise the group is checked but the
