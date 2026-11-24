@@ -1,27 +1,59 @@
 # Morpho Actions Verifier for Go
 
-Check whether the wallet calls in a prepared Morpho Actions API response match
-the original request. Verification runs synchronously in memory. It does not
-call the API, read chain state, or verify proofs or signatures.
+Check that the wallet calls returned by the [Morpho Actions API][actions-api]
+match the action your app requested. `Verify` returns `true` or `false`
+synchronously in memory. It makes no network calls and does not simulate or
+submit transactions.
 
-## Use it
+## Install
 
-Once the module is published:
+Use Go 1.25.1 or newer. Until there is a release tag, install from `dev`:
 
 ```sh
-go get github.com/morpho-org/actions-verifier-go
+go get github.com/morpho-org/actions-verifier-go@dev
 ```
 
-The import path provides package `verifier`.
+Import it as package `verifier`.
+
+## Quick start
+
+```mermaid
+flowchart TD
+    A["Build intent; keep the original path and body"] --> B["Call the Morpho Actions API"]
+    B --> C["Get prepared calls"]
+    C --> D{"Verify(intent, calls)"}
+    D -->|true| E["Check simulation and proof"]
+    E --> G["Review, then sign and send in order; wait for each successful receipt"]
+    D -->|false| F["Stop; do not sign"]
+```
+
+1. Save the concrete endpoint path and original JSON body before you send
+   the request. Use the path only, not a route template or full URL.
+2. Call the Actions API. For a response that needs a continuation, follow
+   the [API's response checks][verify-responses] before signing any typed
+   data. Verify the final calls against the **original** request, not the
+   continuation body.
+3. Once the status is `prepared`, pass the full `data.calls` list in the
+   returned order. If verification fails or the response is not prepared,
+   do not sign or send transaction calls.
+4. After verification and the API's separate simulation and proof checks,
+   show the calls for review. If approved, sign and send them in order
+   from the requested account on the requested chain. Wait for each transaction
+   to confirm with a successful receipt before sending the next. Alternatively,
+   use EIP-5792 `wallet_sendCalls` with `atomicRequired: true` if the wallet
+   supports atomic batching on that chain. Call entries do not encode the
+   transaction sender or chain.
 
 ```go
+package integration
+
 import (
     "encoding/json"
 
     "github.com/morpho-org/actions-verifier-go"
 )
 
-func matches(path string, requestBody, responseBody []byte) bool {
+func matchesPreparedCalls(path string, requestBody, responseBody []byte) bool {
     var response struct {
         Data struct {
             Status string          `json:"status"`
@@ -35,19 +67,8 @@ func matches(path string, requestBody, responseBody []byte) bool {
 }
 ```
 
-Keep the trusted request path and body from before you sent the request.
-Use the concrete path (for example, `/v0/actions/blue/markets/1:0x…/supply`),
-the original JSON body, and all of `data.calls` in the returned order. Sign
-and send from the requested account on the requested chain; a transaction's
-sender and chain are not encoded in these call entries.
-
-If the API asks for signatures before preparing the calls, verify the final
-calls against the initial action request, not the continuation body containing
-the continuation token and signatures.
-
-Use a Go module version tag for reproducible builds. The root import path
-does not change for v0 or v1; an incompatible Go v2 would use a `/v2`
-module suffix, independent of the HTTP endpoint version.
+The [API reference][actions-api] lists endpoint paths, authentication
+requirements, and how to request an API key.
 
 ## What a result means
 
@@ -103,45 +124,49 @@ funding shares in the call are the full position.
 
 ## Supported route families
 
-| Family | Actions |
-| --- | --- |
-| Blue | borrow, refinance, repay, supply, supply-collateral, withdraw, withdraw-collateral |
-| Vault V1 | deposit, withdraw |
-| Vault V2 | deposit, force-withdraw, redeem-in-kind, withdraw |
-| Midnight markets | borrow, lend, repay, supply-collateral, withdraw, withdraw-collateral |
-| Midnight offer groups | take |
-| Midnight offers | borrow, cancel, funding/withdraw, lend, repay, withdraw |
+| Family | Actions | Supported chain IDs |
+| --- | --- | --- |
+| Blue | borrow, refinance, repay, supply, supply-collateral, withdraw, withdraw-collateral | 1, 10, 130, 137, 143, 196, 480, 988, 999, 4217, 4663, 5042, 8453, 42161, 747474 |
+| Vault V1 | deposit, withdraw | 1, 10, 130, 137, 143, 480, 988, 999, 8453, 42161, 747474 |
+| Vault V2 | deposit, force-withdraw, redeem-in-kind, withdraw | Same as Blue |
+| Midnight markets | borrow, lend, repay, supply-collateral, withdraw, withdraw-collateral | 1, 4663, 5042, 8453 |
+| Midnight offer groups | take | Same as Midnight markets |
+| Midnight offers | borrow, cancel, funding/withdraw, lend, repay, withdraw | Same as Midnight markets |
 
-The per-chain pins are in [chains_blue_vault.json](chains_blue_vault.json).
-A family needs its corresponding bundle address on that chain. Vault V2
-force-withdraw and redeem-in-kind require a Vault Exit deployment. The
-deployment addresses and ABI fragments are derived from the Morpho Actions
-registries; the verifier checks the pinned selector against each ABI
-signature at initialization. Argument names and tuple field names are also
-part of the verifier's schema contract, even though they do not affect the
-selector. When updating an ABI, check those names against the verifier and
-run the route fixtures.
+These are the verifier's supported chain and route combinations, not a promise
+that a particular market, vault, or API request is available. Contract addresses
+are listed in [chains_blue_vault.json](chains_blue_vault.json) and
+[chains_midnight.json](chains_midnight.json).
 
-Midnight deployment pins are in [chains_midnight.json](chains_midnight.json)
-(chains 1, 4663, 5042, and 8453). Midnight market IDs are derived from the
-ABI-encoded market and its pinned deployment, not from a Blue market hash.
+## Update safely
+
+Pin an exact Go module version for reproducible builds: use a release tag
+when available, or keep the pseudo-version recorded by `go get`.
+When upgrading, rerun your integration tests against the routes and chains
+you use. Go module major versions are independent of the HTTP API version;
+the `/v0/actions` path does not determine the Go import path.
+
+## Tests
+
+The standard test suite uses local fixtures and needs no API key.
 
 ```sh
+go test ./...
 go vet ./...
 go test -race ./...
 ```
 
-## Test against a live Actions API
+### Optional live API test
 
-The live test is off by default. Create a JSON array of intents (each with
-`path` and `body`, as above) using markets, accounts and positions that can
-exercise each route on your chosen chains. Set `ACTIONS_API_KEY` in your
-environment from your secret store; do not put it in the intents file.
+The live test is skipped unless `ACTIONS_API_URL` is set. Set it to the
+base URL listed in the [Actions API reference][actions-api], without an
+endpoint path. Export `ACTIONS_API_KEY` from your secret store if the endpoint
+requires one. Create a JSON array of intents (each with `path` and `body`)
+for markets, vaults, and accounts with the state your actions require.
+Do not put credentials in that file.
 
 ```sh
-ACTIONS_API_URL=https://private.api.morpho.org \
-  ACTIONS_API_CASES=/path/to/cases.json \
-  go test -run '^TestLiveActions$' -count=1 -v
+ACTIONS_API_CASES=/path/to/cases.json go test -run '^TestLiveActions$' -count=1 -v
 ```
 
 For a local Actions API use its loopback URL and omit the key if it is not
@@ -149,3 +174,6 @@ required. The test sends only preparation requests. It does not sign or
 broadcast transactions, save responses, or print headers. A non-prepared
 response is reported separately from a prepared response rejected by
 `Verify`; an authentication failure stops further requests to that host.
+
+[actions-api]: https://docs.morpho.org/api/#action-api
+[verify-responses]: https://docs.morpho.org/api/actions/verify-responses/
