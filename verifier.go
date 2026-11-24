@@ -450,9 +450,15 @@ func prerequisites(calls []Call, chain deployment, bundle, token common.Address,
 				return false
 			}
 			if token == zeroAddress {
-				if approvals != 1 || callTo(call, bundle) || chain.pinned(common.HexToAddress(call.To)) ||
-					midnightChains[chain.ID].pinned(common.HexToAddress(call.To)) ||
-					n.Sign() <= 0 || (n.Cmp(maxUint256) != 0 && (n.Cmp(maximum) > 0 || n.Cmp(maxUint96) == 0)) {
+				target := common.HexToAddress(call.To)
+				if len(calls) > 2 || target == bundle || chain.pinned(target) || midnightChains[chain.ID].pinned(target) {
+					return false
+				}
+				if n.Sign() == 0 {
+					if i != 0 || len(calls) != 2 || calls[1].Kind != "approval" || !callTo(calls[1], target) {
+						return false
+					}
+				} else if i != len(calls)-1 || (n.Cmp(maxUint256) != 0 && (n.Cmp(maximum) > 0 || n.Cmp(maxUint96) == 0)) {
 					return false
 				}
 				continue

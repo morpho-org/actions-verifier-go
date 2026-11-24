@@ -82,6 +82,18 @@ func TestVaultDepositApproval(t *testing.T) {
 		pinnedToken.To = main.To
 		overIntent := unlimited
 		overIntent.Data = unlimited.Data[:136] + "fe"
+		reset := approval
+		reset.ID = "call_2"
+		reset.Data = approval.Data[:74] + strings.Repeat("00", 32)
+		resetWrongToken := reset
+		resetWrongToken.To = "0x0000000000000000000000000000000000000099"
+		resetWrongSpender := reset
+		resetWrongSpender.Data = wrongSpender.Data[:74] + reset.Data[74:]
+		for _, final := range []Call{approval, unlimited} {
+			if !Verify(f.Intent, []Call{reset, final, main}) {
+				t.Fatalf("%s: SDK reset pair rejected", main.Kind)
+			}
+		}
 		for _, tt := range []struct {
 			name  string
 			calls []Call
@@ -92,6 +104,12 @@ func TestVaultDepositApproval(t *testing.T) {
 			{"unlimited-wrong-spender", []Call{wrongSpender, main}},
 			{"unlimited-pinned-token", []Call{pinnedToken, main}},
 			{"over-intent", []Call{overIntent, main}},
+			{"reset-only", []Call{reset, main}},
+			{"reset-last", []Call{approval, reset, main}},
+			{"reset-wrong-token", []Call{resetWrongToken, unlimited, main}},
+			{"reset-wrong-spender", []Call{resetWrongSpender, unlimited, main}},
+			{"reset-final-wrong-spender", []Call{reset, wrongSpender, main}},
+			{"reset-over-intent", []Call{reset, overIntent, main}},
 		} {
 			t.Run(main.Kind+"/"+tt.name, func(t *testing.T) {
 				if Verify(f.Intent, tt.calls) {
