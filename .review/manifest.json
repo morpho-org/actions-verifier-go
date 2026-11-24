@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "guidance": "review.md",
+  "skills": [
+    {
+      "id": "actions-verifier",
+      "title": "Actions verifier trust boundary",
+      "description": "Review input binding, fail-closed dispatch, approval limits, offline execution, and fixture disclosure.",
+      "path": "skills/actions-verifier/SKILL.md"
+    }
+  ],
+  "routing": {
+    "pathRules": [
+      {
+        "id": "verification-boundary",
+        "paths": ["*.go", "abi_*.json", "chains_*.json", "testdata/**", "README.md"],
+        "minimumDepth": "thorough",
+        "lenses": ["behavior", "security"]
+      },
+      {
+        "id": "workflow-authority",
+        "paths": [".github/workflows/**", ".review/**"],
+        "minimumDepth": "thorough",
+        "minimumRisk": "high",
+        "lenses": ["security"]
+      }
+    ]
+  }
+}
