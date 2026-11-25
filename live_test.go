@@ -68,7 +68,7 @@ func liveActionsURL(host, cases, key string) (*url.URL, error) {
 		return nil, errors.New("set ACTIONS_API_URL for live requests")
 	}
 	base, err := url.Parse(host)
-	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || strings.Contains(host, "#") {
 		return nil, errors.New("invalid ACTIONS_API_URL")
 	}
 	hostname := base.Hostname()
@@ -109,6 +109,10 @@ func TestLiveActionsConfiguration(t *testing.T) {
 		{name: "IPv4-mapped IPv6", host: "https://[::ffff:127.0.0.1]", cases: cases, missing: "ACTIONS_API_KEY"},
 		{name: "non-loopback HTTP", host: "http://128.0.0.1", cases: cases, key: key, missing: "must use HTTPS"},
 		{name: "URL without cases", host: host, key: key, missing: "ACTIONS_API_CASES"},
+		{name: "URL with query", host: host + "?a=b", cases: cases, key: key, missing: "invalid ACTIONS_API_URL"},
+		{name: "URL with empty query", host: host + "?", cases: cases, key: key, missing: "invalid ACTIONS_API_URL"},
+		{name: "URL with fragment", host: host + "#section", cases: cases, key: key, missing: "invalid ACTIONS_API_URL"},
+		{name: "URL with empty fragment", host: host + "#", cases: cases, key: key, missing: "invalid ACTIONS_API_URL"},
 		{name: "complete", host: host, cases: cases, key: key, enabled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
