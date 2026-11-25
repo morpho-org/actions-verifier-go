@@ -159,8 +159,8 @@ go test -race ./...
 ### Optional live API test
 
 The live test is skipped when neither `ACTIONS_API_CASES` nor `ACTIONS_API_URL`
-is set. To run it, set all three variables below. Use the base URL listed in the
-[Actions API reference][actions-api], without an endpoint path, and load
+is set. For the hosted API, set all three variables below. Use the base URL
+listed in the [Actions API reference][actions-api], without an endpoint path, and load
 `ACTIONS_API_KEY` from your secret store. Create a JSON array of intents (each
 with `path` and `body`) for markets, vaults, and accounts with the state your
 actions require. Do not put credentials in that file.
@@ -171,6 +171,9 @@ ACTIONS_API_KEY="${ACTIONS_API_KEY:?load the Actions API key first}" \
 ACTIONS_API_CASES=/path/to/cases.json \
   go test -run '^TestLiveActions$' -count=1 -v
 ```
+
+For a local API you may omit `ACTIONS_API_KEY` when the URL host is `localhost`,
+an IPv4 address in `127.0.0.0/8`, or `::1`.
 
 The test sends only preparation requests. It does not sign or
 broadcast transactions, save responses, or print headers. A non-prepared

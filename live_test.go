@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -17,20 +18,12 @@ func TestLiveActions(t *testing.T) {
 	host := os.Getenv("ACTIONS_API_URL")
 	cases := os.Getenv("ACTIONS_API_CASES")
 	key := os.Getenv("ACTIONS_API_KEY")
-	enabled, err := liveActionsConfigured(host, cases, key)
+	base, err := liveActionsURL(host, cases, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !enabled {
-		t.Skip("set ACTIONS_API_URL, ACTIONS_API_CASES, and ACTIONS_API_KEY to enable live requests")
-	}
-	base, err := url.Parse(host)
-	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
-		t.Fatal("invalid ACTIONS_API_URL")
-	}
-	localHTTP := base.Scheme == "http" && (base.Hostname() == "localhost" || base.Hostname() == "127.0.0.1" || base.Hostname() == "::1")
-	if base.Scheme != "https" && !localHTTP {
-		t.Fatal("ACTIONS_API_URL must use HTTPS or local loopback HTTP")
+	if base == nil {
+		t.Skip("set ACTIONS_API_URL and ACTIONS_API_CASES to enable live requests")
 	}
 	input, err := os.ReadFile(cases)
 	if err != nil {
@@ -67,19 +60,30 @@ func TestLiveActions(t *testing.T) {
 	}
 }
 
-func liveActionsConfigured(host, cases, key string) (bool, error) {
-	switch {
-	case host == "" && cases == "":
-		return false, nil
-	case host == "":
-		return false, errors.New("set ACTIONS_API_URL for live requests")
-	case key == "":
-		return false, errors.New("set ACTIONS_API_KEY for live requests")
-	case cases == "":
-		return false, errors.New("set ACTIONS_API_CASES to a readable JSON array of intents")
-	default:
-		return true, nil
+func liveActionsURL(host, cases, key string) (*url.URL, error) {
+	if host == "" && cases == "" {
+		return nil, nil
 	}
+	if host == "" {
+		return nil, errors.New("set ACTIONS_API_URL for live requests")
+	}
+	base, err := url.Parse(host)
+	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || strings.Contains(host, "#") {
+		return nil, errors.New("invalid ACTIONS_API_URL")
+	}
+	hostname := base.Hostname()
+	ip, _ := netip.ParseAddr(hostname)
+	loopback := hostname == "localhost" || (ip.Is4() && ip.IsLoopback()) || ip == netip.IPv6Loopback()
+	if base.Scheme != "https" && !(base.Scheme == "http" && loopback) {
+		return nil, errors.New("ACTIONS_API_URL must use HTTPS or local loopback HTTP")
+	}
+	if key == "" && !loopback {
+		return nil, errors.New("set ACTIONS_API_KEY for live requests")
+	}
+	if cases == "" {
+		return nil, errors.New("set ACTIONS_API_CASES to a readable JSON array of intents")
+	}
+	return base, nil
 }
 
 func TestLiveActionsConfiguration(t *testing.T) {
@@ -95,11 +99,25 @@ func TestLiveActionsConfiguration(t *testing.T) {
 		{name: "key alone does not opt in", key: key},
 		{name: "cases without URL", cases: cases, key: key, missing: "ACTIONS_API_URL"},
 		{name: "cases without key", host: host, cases: cases, missing: "ACTIONS_API_KEY"},
+		{name: "keyless localhost", host: "http://localhost:8080", cases: cases, enabled: true},
+		{name: "mixed-case localhost HTTP", host: "http://LocalHost:8080", cases: cases, key: key, missing: "must use HTTPS"},
+		{name: "mixed-case localhost without key", host: "https://LocalHost:8080", cases: cases, missing: "ACTIONS_API_KEY"},
+		{name: "keyless IPv4 loopback", host: "http://127.42.0.7:8080", cases: cases, enabled: true},
+		{name: "keyless IPv6 loopback", host: "https://[::1]:8080", cases: cases, enabled: true},
+		{name: "localhost suffix", host: "https://localhost.example.test", cases: cases, missing: "ACTIONS_API_KEY"},
+		{name: "outside IPv4 loopback", host: "https://128.0.0.1", cases: cases, missing: "ACTIONS_API_KEY"},
+		{name: "IPv4-mapped IPv6", host: "https://[::ffff:127.0.0.1]", cases: cases, missing: "ACTIONS_API_KEY"},
+		{name: "non-loopback HTTP", host: "http://128.0.0.1", cases: cases, key: key, missing: "must use HTTPS"},
 		{name: "URL without cases", host: host, key: key, missing: "ACTIONS_API_CASES"},
+		{name: "URL with query", host: host + "?a=b", cases: cases, key: key, missing: "invalid ACTIONS_API_URL"},
+		{name: "URL with empty query", host: host + "?", cases: cases, key: key, missing: "invalid ACTIONS_API_URL"},
+		{name: "URL with fragment", host: host + "#section", cases: cases, key: key, missing: "invalid ACTIONS_API_URL"},
+		{name: "URL with empty fragment", host: host + "#", cases: cases, key: key, missing: "invalid ACTIONS_API_URL"},
 		{name: "complete", host: host, cases: cases, key: key, enabled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			enabled, err := liveActionsConfigured(tc.host, tc.cases, tc.key)
+			base, err := liveActionsURL(tc.host, tc.cases, tc.key)
+			enabled := base != nil
 			if enabled != tc.enabled {
 				t.Errorf("enabled = %t, want %t", enabled, tc.enabled)
 			}
@@ -122,7 +140,9 @@ func checkLive(t *testing.T, client *http.Client, base, key string, intent Inten
 		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", key)
+	if key != "" {
+		req.Header.Set("x-api-key", key)
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		t.Errorf("chain %d: API unavailable (transport failure)", chain)
