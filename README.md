@@ -158,19 +158,21 @@ go test -race ./...
 
 ### Optional live API test
 
-The live test is skipped unless `ACTIONS_API_URL` is set. Set it to the
-base URL listed in the [Actions API reference][actions-api], without an
-endpoint path. Export `ACTIONS_API_KEY` from your secret store if the endpoint
-requires one. Create a JSON array of intents (each with `path` and `body`)
-for markets, vaults, and accounts with the state your actions require.
-Do not put credentials in that file.
+The live test is skipped when neither `ACTIONS_API_CASES` nor `ACTIONS_API_URL`
+is set. To run it, set all three variables below. Use the base URL listed in the
+[Actions API reference][actions-api], without an endpoint path, and load
+`ACTIONS_API_KEY` from your secret store. Create a JSON array of intents (each
+with `path` and `body`) for markets, vaults, and accounts with the state your
+actions require. Do not put credentials in that file.
 
 ```sh
-ACTIONS_API_CASES=/path/to/cases.json go test -run '^TestLiveActions$' -count=1 -v
+ACTIONS_API_URL='<base URL from the Actions API reference>' \
+ACTIONS_API_KEY="${ACTIONS_API_KEY:?load the Actions API key first}" \
+ACTIONS_API_CASES=/path/to/cases.json \
+  go test -run '^TestLiveActions$' -count=1 -v
 ```
 
-For a local Actions API use its loopback URL and omit the key if it is not
-required. The test sends only preparation requests. It does not sign or
+The test sends only preparation requests. It does not sign or
 broadcast transactions, save responses, or print headers. A non-prepared
 response is reported separately from a prepared response rejected by
 `Verify`; an authentication failure stops further requests to that host.

@@ -3,6 +3,7 @@ package verifier
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,8 +15,14 @@ import (
 
 func TestLiveActions(t *testing.T) {
 	host := os.Getenv("ACTIONS_API_URL")
-	if host == "" {
-		t.Skip("set ACTIONS_API_URL to enable live requests")
+	cases := os.Getenv("ACTIONS_API_CASES")
+	key := os.Getenv("ACTIONS_API_KEY")
+	enabled, err := liveActionsConfigured(host, cases, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !enabled {
+		t.Skip("set ACTIONS_API_URL, ACTIONS_API_CASES, and ACTIONS_API_KEY to enable live requests")
 	}
 	base, err := url.Parse(host)
 	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
@@ -25,7 +32,7 @@ func TestLiveActions(t *testing.T) {
 	if base.Scheme != "https" && !localHTTP {
 		t.Fatal("ACTIONS_API_URL must use HTTPS or local loopback HTTP")
 	}
-	input, err := os.ReadFile(os.Getenv("ACTIONS_API_CASES"))
+	input, err := os.ReadFile(cases)
 	if err != nil {
 		t.Fatal("set ACTIONS_API_CASES to a readable JSON array of intents")
 	}
@@ -55,7 +62,54 @@ func TestLiveActions(t *testing.T) {
 			if denied {
 				t.Skipf("chain %d: not run after authentication failure", r.chain)
 			}
-			denied = checkLive(t, client, strings.TrimRight(base.String(), "/"), os.Getenv("ACTIONS_API_KEY"), intent, r.chain)
+			denied = checkLive(t, client, strings.TrimRight(base.String(), "/"), key, intent, r.chain)
+		})
+	}
+}
+
+func liveActionsConfigured(host, cases, key string) (bool, error) {
+	switch {
+	case host == "" && cases == "":
+		return false, nil
+	case host == "":
+		return false, errors.New("set ACTIONS_API_URL for live requests")
+	case key == "":
+		return false, errors.New("set ACTIONS_API_KEY for live requests")
+	case cases == "":
+		return false, errors.New("set ACTIONS_API_CASES to a readable JSON array of intents")
+	default:
+		return true, nil
+	}
+}
+
+func TestLiveActionsConfiguration(t *testing.T) {
+	const host = "https://example.test"
+	const cases = "cases.json"
+	const key = "test-key"
+	for _, tc := range []struct {
+		name, host, cases, key string
+		enabled                bool
+		missing                string
+	}{
+		{name: "unset"},
+		{name: "key alone does not opt in", key: key},
+		{name: "cases without URL", cases: cases, key: key, missing: "ACTIONS_API_URL"},
+		{name: "cases without key", host: host, cases: cases, missing: "ACTIONS_API_KEY"},
+		{name: "URL without cases", host: host, key: key, missing: "ACTIONS_API_CASES"},
+		{name: "complete", host: host, cases: cases, key: key, enabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enabled, err := liveActionsConfigured(tc.host, tc.cases, tc.key)
+			if enabled != tc.enabled {
+				t.Errorf("enabled = %t, want %t", enabled, tc.enabled)
+			}
+			if tc.missing == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.missing) {
+				t.Errorf("error = %v, want a message naming %s", err, tc.missing)
+			}
 		})
 	}
 }
@@ -68,9 +122,7 @@ func checkLive(t *testing.T, client *http.Client, base, key string, intent Inten
 		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if key != "" {
-		req.Header.Set("x-api-key", key)
-	}
+	req.Header.Set("x-api-key", key)
 	res, err := client.Do(req)
 	if err != nil {
 		t.Errorf("chain %d: API unavailable (transport failure)", chain)
