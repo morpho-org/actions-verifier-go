@@ -73,7 +73,7 @@ func liveActionsURL(host, cases, key string) (*url.URL, error) {
 	}
 	hostname := base.Hostname()
 	ip, _ := netip.ParseAddr(hostname)
-	loopback := strings.ToLower(hostname) == "localhost" || (ip.Is4() && ip.IsLoopback()) || ip == netip.IPv6Loopback()
+	loopback := hostname == "localhost" || (ip.Is4() && ip.IsLoopback()) || ip == netip.IPv6Loopback()
 	if base.Scheme != "https" && !(base.Scheme == "http" && loopback) {
 		return nil, errors.New("ACTIONS_API_URL must use HTTPS or local loopback HTTP")
 	}
@@ -100,6 +100,8 @@ func TestLiveActionsConfiguration(t *testing.T) {
 		{name: "cases without URL", cases: cases, key: key, missing: "ACTIONS_API_URL"},
 		{name: "cases without key", host: host, cases: cases, missing: "ACTIONS_API_KEY"},
 		{name: "keyless localhost", host: "http://localhost:8080", cases: cases, enabled: true},
+		{name: "mixed-case localhost HTTP", host: "http://LocalHost:8080", cases: cases, key: key, missing: "must use HTTPS"},
+		{name: "mixed-case localhost without key", host: "https://LocalHost:8080", cases: cases, missing: "ACTIONS_API_KEY"},
 		{name: "keyless IPv4 loopback", host: "http://127.42.0.7:8080", cases: cases, enabled: true},
 		{name: "keyless IPv6 loopback", host: "https://[::1]:8080", cases: cases, enabled: true},
 		{name: "localhost suffix", host: "https://localhost.example.test", cases: cases, missing: "ACTIONS_API_KEY"},
