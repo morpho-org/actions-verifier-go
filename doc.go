@@ -15,5 +15,5 @@
 // verified. Verify state-dependent price, deadline and penalty limits and
 // simulate independently before signing. See the [README] for the verification boundary.
 //
-// [README]: https://github.com/morpho-org/calldata-verifier-go#what-a-result-means
+// [README]: https://github.com/morpho-org/calldata-verifier-go#known-limitations
 package calldataverifier
