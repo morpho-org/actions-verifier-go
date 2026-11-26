@@ -4,7 +4,7 @@ Reference: `@morpho-org/calldata-verifier` at
 `71a07c480538fe4925d27411bd95d95a1b93b4ae`.
 
 All **208 declarations** are accounted for: **23 mapped** to existing Go
-tests, **176 ported** as **802 distinct verifier inputs**, and **9 JS-only**.
+tests, **176 ported** as **787 distinct verifier inputs**, and **9 JS-only**.
 A declaration using `it.each` or `test.each` may expand to multiple tests. The
 parenthesized counts below are distinct verifier inputs per ported declaration,
 including distinct verifier calls made within a single test.
@@ -18,13 +18,14 @@ input cannot enter the typed API, the replay checks that Go's JSON decoder
 rejects it instead. Long repeated fixture strings are stored once per file and
 referenced by `$p<N>` (a zero-based index into `strings`). Go tests require no
 TypeScript checkout, JavaScript runtime, or network access.
+See [regeneration instructions](parity-generation.md) when updating the pin.
 
 | TypeScript source | Declaration | Layer | Go counterpart |
 | --- | --- | --- | --- |
-| `actionProof.test.ts:148` | rejects b64=%j without crit | 6 | Ported: `TestParityProof/actionProof.test.ts:148` (6) |
-| `actionProof.test.ts:163` | rejects invalid proof JWK $field | 6 | Ported: `TestParityProof/actionProof.test.ts:163` (16) |
+| `actionProof.test.ts:148` | rejects b64=%j without crit | 6 | Ported: `TestParityProof/actionProof.test.ts:148` (4) |
+| `actionProof.test.ts:163` | rejects invalid proof JWK $field | 6 | Ported: `TestParityProof/actionProof.test.ts:163` (9) |
 | `actionProof.test.ts:188` | rejects a string-coercible JWK %s | 6 | Ported: `TestParityProof/actionProof.test.ts:188` (2) |
-| `actionProof.test.ts:199` | rejects invalid proof header $field | 6 | Ported: `TestParityProof/actionProof.test.ts:199` (14) |
+| `actionProof.test.ts:199` | rejects invalid proof header $field | 6 | Ported: `TestParityProof/actionProof.test.ts:199` (8) |
 | `actionProof.test.ts:222` | rejects an independently signed invalid $field claim | 6 | Ported: `TestParityProof/actionProof.test.ts:222` (5) |
 | `actionProof.test.ts:250` | rejects $field | 6 | Ported: `TestParityProof/actionProof.test.ts:250` (7) |
 | `actionProof.test.ts:279` | rejects a correctly signed response whose data is not an object | 6 | Ported: `TestParityProof/actionProof.test.ts:279` (1) |
