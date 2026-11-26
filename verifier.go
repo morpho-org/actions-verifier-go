@@ -3,6 +3,7 @@ package calldataverifier
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -115,8 +116,7 @@ func VerifyCalldata(intent CalldataIntent, calls []CalldataCall, options ...Veri
 	if len(options) > 1 {
 		return nil, callError("options", nil)
 	}
-	vaultPointer, isVaultPointer := intent.(*VaultCalldataIntent)
-	if intent == nil || (isVaultPointer && vaultPointer == nil) {
+	if intent == nil || (reflect.ValueOf(intent).Kind() == reflect.Pointer && reflect.ValueOf(intent).IsNil()) {
 		return nil, callError("action", nil)
 	}
 	commonIntent := intent.calldataIntent()
@@ -159,6 +159,12 @@ func VerifyCalldata(intent CalldataIntent, calls []CalldataCall, options ...Veri
 	}
 	if vault != nil {
 		return verifyVault(*vault, calls, chain)
+	}
+	switch i := intent.(type) {
+	case BlueCalldataIntent:
+		return verifyBlue(i, calls, chain)
+	case *BlueCalldataIntent:
+		return verifyBlue(*i, calls, chain)
 	}
 	return nil, callError("action", first)
 }

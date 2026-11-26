@@ -1,9 +1,9 @@
 // Package calldataverifier checks ordered Morpho Actions API wallet calls against
 // the original intent without network access or execution.
 //
-// VerifyCalldata decodes and checks supported Vault calls, returning typed errors
-// for failed checks. Supply the vault's trusted underlying asset, original
-// amount and funding, and the caller's fee limits independently of the response.
+// VerifyCalldata decodes and checks Vault and Morpho Blue calls, returning typed
+// errors for failed checks. Supply the original market or vault, amounts,
+// funding, and fee limits independently of the response.
 // Invoke the verified calls only from the intended account and chain.
 //
 // A successful check is not a simulation, state check, or signature verification.

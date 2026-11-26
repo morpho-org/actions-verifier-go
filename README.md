@@ -47,6 +47,25 @@ underlying token as `Asset`. For native funding, set `Funding.Type` to
 `"native"` or `"auto"` and supply the original `MaxNativeAssets` in base units.
 Call labels (`Kind`) do not select the rule.
 
+### Supported Morpho Blue actions
+
+Use `BlueCalldataIntent` with the original market ID and the original amount,
+funding policy, and referral terms where applicable.
+
+| Intent | Amount and other inputs |
+| --- | --- |
+| `blue.supply`, `blue.supply_collateral`, `blue.withdraw_collateral` | Exact asset amount. |
+| `blue.borrow` | Exact assets to borrow; optional `CollateralAmount` to supply. |
+| `blue.repay` | Assets, shares, or all; optional `CollateralAmount` to withdraw. |
+| `blue.withdraw` | Assets, shares, or all. |
+| `blue.refinance` | Original market and `DestinationMarket` (`chain_id:market_hash`). |
+
+The verifier binds the expected market, amount and authorized legs to the
+bundle. It checks the encoded LTV guard, authorization and approval shape,
+fee caps, and reallocation structure. It does not check actual positions,
+liquidity, authorization state, or state-derived share and all-mode amounts.
+Blue reallocation legs with nonzero penalties are rejected.
+
 The default registry and ABIs are embedded from the pinned
 `@morpho-org/calldata-verifier` reference. For additional trusted deployments,
 construct a `Registry` with `NewRegistry` and supply it in `VerifyOptions`.
@@ -97,7 +116,7 @@ simulate before signing. Approvals can persist beyond the action.
 go test -race ./...
 ```
 
-The shared Vault vectors and ABI and deployment snapshot under `testdata/`
+The shared Vault and Blue vectors and the ABI and deployment snapshot under `testdata/`
 record their source commit. Regenerate with
 `bun generate-snapshot.ts /path/to/pinned-sdk-checkout` after installing the
 pinned checkout's lockfile dependencies. Go builds and tests do not use Bun.

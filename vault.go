@@ -75,15 +75,19 @@ func verifyVault(intent VaultCalldataIntent, calls []CalldataCall, chain Deploym
 }
 
 func checkAssets(actual *big.Int, requested Amount, call CalldataCall) error {
+	return checkNamedAssets(actual, requested, "amount", call)
+}
+
+func checkNamedAssets(actual *big.Int, requested Amount, field string, call CalldataCall) error {
 	if requested.Unit != "assets" {
-		return amountError("amount.unit", call)
+		return amountError(field+".unit", call)
 	}
-	n, err := readUint(requested.Value, "amount", call)
+	n, err := readUint(requested.Value, field, call)
 	if err != nil {
 		return err
 	}
 	if actual.Sign() == 0 || actual.Cmp(n) != 0 {
-		return amountError("amount", call)
+		return amountError(field, call)
 	}
 	return nil
 }

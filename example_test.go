@@ -31,3 +31,22 @@ func ExampleVerifyCalldata() {
 	}
 	// Output: to call_0
 }
+
+func ExampleVerifyCalldata_blue() {
+	intent := calldataverifier.BlueCalldataIntent{
+		CommonIntent: calldataverifier.CommonIntent{
+			Action: "blue.repay", ChainID: 1,
+			Account: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+		},
+		Market:  "0x0000000000000000000000000000000000000000000000000000000000000001",
+		Amount:  calldataverifier.Amount{Unit: "all"},
+		Funding: &calldataverifier.Funding{Type: "erc20"},
+	}
+	// Pass the ordered calls from the prepared response, not an empty slice.
+	_, err := calldataverifier.VerifyCalldata(intent, []calldataverifier.CalldataCall{})
+	var callError *calldataverifier.CalldataCallError
+	if errors.As(err, &callError) {
+		fmt.Println(callError.Field)
+	}
+	// Output: calls
+}
