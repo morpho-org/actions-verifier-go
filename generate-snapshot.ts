@@ -69,3 +69,10 @@ for (const [name, exported, file = name] of [["vault", "vaultCases"], ["blue", "
     JSON.stringify({ revision, cases: fixtures[exported] }, null, 2) + "\n",
   );
 }
+for (const file of ["action-proof-vectors.json", "action-proof-jwks.json"]) {
+  await Bun.write(
+    join(import.meta.dir, "testdata", file),
+    Bun.file(join(root, "packages/calldata-verifier/src/test", file)),
+  );
+}
+await Bun.write(join(import.meta.dir, "testdata/action-proof-revision.txt"), revision + "\n");

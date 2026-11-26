@@ -3,6 +3,7 @@ package calldataverifier_test
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/morpho-org/calldata-verifier-go"
 )
@@ -84,4 +85,19 @@ func ExampleVerifyCalldata_unsupportedOffer() {
 		fmt.Println(unsupported.Field)
 	}
 	// Output: midnight.make_lend
+}
+
+func ExampleVerifyCalldata_actionProof() {
+	// Obtain these inputs from the trusted key source and original HTTP exchange.
+	verify := func(intent calldataverifier.CalldataIntent, calls []calldataverifier.CalldataCall,
+		jwks []byte, header string, req calldataverifier.ActionProofRequest, res calldataverifier.ActionProofResponse,
+	) ([]calldataverifier.DecodedCalldataCall, error) {
+		now := float64(time.Now().Unix())
+		return calldataverifier.VerifyCalldata(intent, calls, calldataverifier.VerifyOptions{
+			Proof: &calldataverifier.ActionProofInput{
+				Header: header, JWKS: jwks, Now: &now, Request: req, Response: res,
+			},
+		})
+	}
+	_ = verify
 }

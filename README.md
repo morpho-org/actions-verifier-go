@@ -115,8 +115,8 @@ addresses. Use `errors.As` with the typed errors (for example,
 `*CalldataTargetError`) and inspect `Field` and the optional `CallID`.
 
 A successful check does not establish execution safety, prove current position
-sizes or allowances, read a vault's underlying token, verify permit signatures,
-or authenticate the API response. The verifier does not enforce
+sizes or allowances, read a vault's underlying token, or verify permit signatures.
+Without a proof input, it does not authenticate the API response. The verifier does not enforce
 `slippage_bps`, `max_penalty_bps`, or request deadlines. Independently verify
 state-derived price limits, deadlines, deallocation and penalty bounds, and
 simulate before signing. Approvals can persist beyond the action.
@@ -143,14 +143,34 @@ simulate before signing. Approvals can persist beyond the action.
   redemption should bound idle assets or Blue supply shares received, not
   rely on a simulated penalty quote.
 
+### Authenticate an Actions API response
+
+Pass `VerifyOptions{Proof: &proof}` to authenticate the response before the
+same static checks. Populate `ActionProofInput` with the `Morpho-Action-Proof`
+header, independently trusted issuer JWKS JSON, the current Unix time in
+seconds, and the exact HTTP exchange. The issuer defaults to
+`https://api.morpho.org/v0/actions`.
+
+Keep the original POST request target, content type, and raw body, and the
+response status, content type, `X-Request-Id`, and body after HTTP transport
+decompression. Do not parse and reserialize either body before passing it to
+the verifier. Fetch and refresh the trusted key set outside the verifier; it
+does not read the clock or make network requests.
+
+Only a signed prepared response with successful simulation can proceed. The
+proof must bind the intended chain and all five fields of each call in order;
+the static verifier still rejects calls that do not match the original intent.
+An authentication error is a `CalldataProofError`; do not fall back to the
+proof-free path if your application requires proof.
+
 ### Development
 
 ```sh
 go test -race ./...
 ```
 
-The shared Vault, Blue, Midnight market, and Midnight offer vectors and the ABI and deployment snapshot under `testdata/`
-record their source commit. Regenerate with
+The shared Vault, Blue, Midnight, and Action Proof vectors and the ABI and
+deployment snapshot under `testdata/` record their source commit. Regenerate with
 `bun generate-snapshot.ts /path/to/pinned-sdk-checkout` after installing the
 pinned checkout's lockfile dependencies. Go builds and tests do not use Bun.
 

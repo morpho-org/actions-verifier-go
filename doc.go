@@ -6,6 +6,9 @@
 // funding, and fee limits independently of the response.
 // Invoke the verified calls only from the intended account and chain.
 // Midnight make-offer actions are unsupported.
+// With VerifyOptions.Proof, VerifyCalldata authenticates the exact request,
+// response, and ordered calls before static validation, using caller-supplied
+// trusted JWKS and time.
 //
 // A successful check is not a simulation, state check, or signature verification.
 // Verify state-dependent price, deadline and penalty limits and simulate

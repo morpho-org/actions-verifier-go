@@ -108,10 +108,12 @@ func (i VaultCalldataIntent) calldataIntent() CommonIntent { return i.CommonInte
 // VerifyOptions provides caller-owned verification configuration.
 type VerifyOptions struct {
 	Registry *Registry
+	Proof    *ActionProofInput
 }
 
 // VerifyCalldata checks ordered Actions API calls against an independently
 // retained intent, without simulation, network access, or input mutation.
+// When Proof is supplied, it authenticates the calls before the static checks.
 func VerifyCalldata(intent CalldataIntent, calls []CalldataCall, options ...VerifyOptions) ([]DecodedCalldataCall, error) {
 	if len(options) > 1 {
 		return nil, callError("options", nil)
@@ -120,6 +122,13 @@ func VerifyCalldata(intent CalldataIntent, calls []CalldataCall, options ...Veri
 		return nil, callError("action", nil)
 	}
 	commonIntent := intent.calldataIntent()
+	if len(options) != 0 && options[0].Proof != nil {
+		var err error
+		calls, err = authenticateCalls(*options[0].Proof, calls, commonIntent.ChainID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var first *CalldataCall
 	if len(calls) != 0 {
 		first = &calls[0]
