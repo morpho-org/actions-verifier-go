@@ -174,7 +174,7 @@ go test -race ./...
 
 The shared Vault, Blue, Midnight, and Action Proof vectors and the ABI and
 deployment snapshot under `testdata/` are pinned to the source of
-`@morpho-org/calldata-verifier@0.0.0`. Regenerate with
+`@morpho-org/calldata-verifier@0.1.0`. Regenerate with
 `bun generate-snapshot.ts /path/to/pinned-sdk-checkout` after installing the
 pinned checkout's lockfile dependencies. Go builds and tests do not use Bun.
 
