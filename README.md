@@ -45,13 +45,17 @@ coverage, not whether the API can prepare a particular action or whether it
 will succeed on-chain.
 
 <!-- chain-support:start -->
-| Chain IDs | Vault deposits and withdrawals | Vault bundled exits | Blue bundle actions | Midnight bundles | Midnight core calls and cancellation | Midnight funding withdrawal |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1, 4217, 4663, 5042, 8453, 42161 | Yes | Yes | Yes | Yes | Yes | Yes |
-| 10, 130, 137, 143, 196, 480, 988, 999, 29032, 747474 | Yes | Yes | Yes | — | — | Yes |
-| 14, 25, 50, 56, 146, 239, 252, 714, 1135, 1329, 1672, 1868, 2741, 2818, 4326, 8217, 16661, 34443, 42220, 42793, 43111, 57073, 59144, 98866, 200901, 534352, 685689, 21000000, 123420001114 | — | — | — | — | — | Yes |
+| Chain IDs | Vault deposits and withdrawals | Vault native deposits | Vault bundled exits | Blue bundle actions | Midnight bundles | Midnight core calls and cancellation | Midnight funding withdrawal |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1, 4663, 8453, 42161 | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| 10, 130, 137, 143, 196, 480, 999, 747474 | Yes | Yes | Yes | Yes | — | — | Yes |
+| 14, 25, 50, 56, 146, 239, 252, 714, 1135, 1329, 1672, 1868, 2741, 2818, 4326, 8217, 16661, 34443, 42220, 42793, 43111, 57073, 59144, 98866, 200901, 534352, 685689, 21000000, 123420001114 | — | — | — | — | — | — | Yes |
+| 988, 29032 | Yes | — | Yes | Yes | — | — | Yes |
+| 4217, 5042 | Yes | — | Yes | Yes | Yes | Yes | Yes |
 <!-- chain-support:end -->
 
+Vault deposits with nonzero native value require a wrapped native token
+(`WNative`) in the registry, and the deposit asset must match it.
 Vault bundled exits are exact-asset force withdrawals and in-kind redemptions.
 An `all` force withdrawal goes directly to the trusted Vault V2 address and
 does not require a bundle deployment. Midnight funding withdrawals go directly
