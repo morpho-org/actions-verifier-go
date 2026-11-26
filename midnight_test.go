@@ -10,6 +10,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+func TestParityMidnight(t *testing.T) {
+	runParity(t, "midnight", parityIntent[MidnightMarketIntent], nil)
+}
+
 // midnight.test.ts: verify prepared market cases against their original intent.
 func TestMidnightMarketVectors(t *testing.T) {
 	for name, vector := range loadVectors[MidnightMarketIntent](t, "midnight-vectors.json") {
