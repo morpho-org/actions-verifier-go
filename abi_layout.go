@@ -1,4 +1,4 @@
-package verifier
+package calldataverifier
 
 import (
 	"bytes"
@@ -9,11 +9,6 @@ import (
 )
 
 const abiWordSize = 32
-
-func canonicalABILayout(inputs abi.Arguments, data []byte) bool {
-	size, ok := abiSequence(data, len(inputs), func(i int) *abi.Type { return &inputs[i].Type })
-	return ok && size == len(data)
-}
 
 func abiHeadSize(t *abi.Type) (size int, dynamic bool) {
 	switch t.T {

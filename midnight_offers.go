@@ -1,178 +1,233 @@
-package verifier
+package calldataverifier
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
-	"reflect"
-	"slices"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 )
 
-func midnightOffer(action string, chain midnightDeployment, body request, call Call, prereqs []Call) bool {
-	account := common.HexToAddress(body.Account)
-	switch action {
-	case "cancel":
-		return len(prereqs) == 0 && midnightCancel(chain, body, call)
-	case "funding/withdraw":
-		if len(prereqs) != 0 || call.Kind != "withdraw_funding" || !callTo(call, chain.Blue) || call.Value != "0" ||
-			!nonzeroAddress(body.FundingAddress) {
-			return false
-		}
-		m := midnightMethods["blue.withdraw"]
-		a, ok := decode(m, call, body.Origin, true)
-		return ok && marketMatches(m, "marketParams", a["marketParams"], body.FundingMarket) &&
-			uintEq(a["assets"], 0) && positive(a["shares"]) &&
-			address(a["onBehalf"]) == common.HexToAddress(body.FundingAddress) && address(a["receiver"]) == account
-	case "borrow", "lend", "repay", "withdraw":
-		return midnightPublish(action, chain, body, call, prereqs)
-	}
-	return false
+// MidnightTakeIntent describes taking a Midnight borrow or lend offer.
+type MidnightTakeIntent struct {
+	CommonIntent
+	ExpiresAt          *uint64                      `json:"expires_at,omitempty"`
+	P2P                *bool                        `json:"p2p,omitempty"`
+	Group              string                       `json:"group"`
+	MarketID           *string                      `json:"market_id,omitempty"`
+	Maker              *string                      `json:"maker,omitempty"`
+	Amount             Amount                       `json:"amount"`
+	Guard              *MidnightGuard               `json:"guard,omitempty"`
+	ReferralFee        *ReferralFee                 `json:"referral_fee,omitempty"`
+	Funding            *Funding                     `json:"funding,omitempty"`
+	CollateralSupplies []MidnightCollateralTransfer `json:"collateral_supplies,omitempty"`
+	nullGuard          bool
 }
 
-func midnightCancel(chain midnightDeployment, body request, call Call) bool {
-	if call.Kind != "cancel_offers" || call.Value != "0" || !callTo(call, chain.Midnight) || len(body.Groups) == 0 {
-		return false
+func (i MidnightTakeIntent) calldataIntent() CommonIntent { return i.CommonIntent }
+
+// UnmarshalJSON preserves the distinction between omitted and null guards.
+func (i *MidnightTakeIntent) UnmarshalJSON(data []byte) error {
+	type fields MidnightTakeIntent
+	var decoded struct {
+		fields
+		Guard json.RawMessage `json:"guard"`
 	}
-	account := common.HexToAddress(body.Account)
-	check := func(c Call, group string, top bool) bool {
-		a, ok := decode(midnightMethods["midnight.setConsumed"], c, body.Origin, top)
-		return ok && matchesWord(a["group"], group) && address(a["onBehalf"]) == account && eq(a["amount"], maxUint128)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
 	}
-	if len(body.Groups) == 1 {
-		return check(call, body.Groups[0], true)
-	}
-	a, ok := decode(midnightMethods["midnight.multicall"], call, body.Origin, true)
-	inner, valid := a["calls"].([][]byte)
-	if !ok || !valid || len(inner) != len(body.Groups) {
-		return false
-	}
-	for i, raw := range inner {
-		if !check(Call{Data: "0x" + hex.EncodeToString(raw)}, body.Groups[i], false) {
-			return false
+	if len(decoded.Guard) != 0 {
+		if err := json.Unmarshal(decoded.Guard, &decoded.fields.Guard); err != nil {
+			return err
 		}
+		decoded.fields.nullGuard = string(decoded.Guard) == "null"
 	}
-	return true
+	*i = MidnightTakeIntent(decoded.fields)
+	return nil
 }
 
-func midnightPublish(action string, chain midnightDeployment, body request, call Call, prereqs []Call) bool {
-	amount, ok := decimal(body.Amount.Value)
-	unit := "assets"
-	if action == "repay" || action == "withdraw" {
-		unit = "units"
-	}
-	if !ok || amount.Sign() <= 0 || body.Amount.Unit != unit || call.Kind != "cancel_and_publish" ||
-		!callTo(call, chain.MidnightBundlesV2) || len(body.Offers.Entries) == 0 {
-		return false
-	}
-	m := midnightMethods[cancelAndMake]
-	a, ok := decode(m, call, body.Origin, true)
-	if !ok || !limits(body, a) || !midnightRatifier(chain, body.Offers.Type, address(a["ratifier"])) ||
-		reflect.ValueOf(a["groupsToCancel"]).Len() != 0 || matchesWord(a["newRoot"], (common.Hash{}).Hex()) ||
-		len(a["payload"].([]byte)) == 0 || !uintEq(a["signatureHeight"], 0) ||
-		!uintEq(a["signatureNonce"], 0) || !uintEq(a["signatureDeadline"], 0) ||
-		!uintEq(a["v"], 0) || !matchesWord(a["r"], (common.Hash{}).Hex()) || !matchesWord(a["s"], (common.Hash{}).Hex()) {
-		return false
-	}
-	caps := make(map[common.Address]*big.Int)
-	market := a["market"]
-	if len(body.Supplies) != 0 {
-		if action != "borrow" || !midnightMarket(m, market, chain, "") {
-			return false
-		}
-		marketID := midnightMarketID(m, market)
-		for _, entry := range body.Offers.Entries {
-			if !stringsEqualHash(entry.Market, marketID) {
-				return false
-			}
-		}
-		caps, ok = midnightChanges(market, a["collateralSupplies"], body.Supplies, false)
-		if !ok {
-			return false
-		}
-	} else if reflect.ValueOf(a["collateralSupplies"]).Len() != 0 || !uintEq(field(market, "ChainId"), 0) ||
-		address(field(market, "Midnight")) != zeroAddress {
-		return false
-	}
-	blue := a["blueMarket"]
-	if action == "lend" && body.FundingSource.Type == "variable_rate_market" {
-		if !eq(a["assetsToPark"], amount) || !marketMatches(m, "blueMarket", blue, body.FundingSource.Market) {
-			return false
-		}
-		token := address(field(blue, "LoanToken"))
-		if token == zeroAddress {
-			return false
-		}
-		caps[token] = amount
-	} else if !uintEq(a["assetsToPark"], 0) || address(field(blue, "LoanToken")) != zeroAddress ||
-		!matchesWord(a["callbackSalt"], (common.Hash{}).Hex()) {
-		return false
-	}
-	if !midnightFunding(chain, body, call, a, caps) {
-		return false
-	}
-	if (action == "lend" && body.FundingSource.Type != "variable_rate_market") || action == "repay" {
-		return midnightWalletOffer(chain, body, prereqs, amount)
-	}
-	return midnightPrereqs(chain, body, prereqs, chain.MidnightBundlesV2, caps)
+// MidnightOfferManagementIntent describes cancellations, funding withdrawals,
+// and unsupported make-offer actions.
+type MidnightOfferManagementIntent struct {
+	CommonIntent
+	ExpiresAt          *uint64                      `json:"expires_at,omitempty"`
+	P2P                *bool                        `json:"p2p,omitempty"`
+	Groups             []string                     `json:"groups,omitempty"`
+	FundingAddress     string                       `json:"funding_address,omitempty"`
+	FundingMarket      string                       `json:"funding_market,omitempty"`
+	Amount             Amount                       `json:"amount,omitempty"`
+	Offers             *MidnightMakerOffers         `json:"offers,omitempty"`
+	MarketParams       []MidnightMarketParams       `json:"market_params,omitempty"`
+	CollateralSupplies []MidnightCollateralTransfer `json:"collateral_supplies,omitempty"`
+	Funding            *Funding                     `json:"funding,omitempty"`
+	FundingSource      *MidnightFundingSource       `json:"funding_source,omitempty"`
 }
 
-func midnightWalletOffer(chain midnightDeployment, body request, prereqs []Call, cap *big.Int) bool {
-	if body.FundingSource.Type != "" && body.FundingSource.Type != "wallet" {
+func (i MidnightOfferManagementIntent) calldataIntent() CommonIntent { return i.CommonIntent }
+
+// MidnightMakerOffers describes price or rate entries for an unsupported make-offer action.
+type MidnightMakerOffers struct {
+	Type    string                    `json:"type"`
+	Entries []MidnightMakerOfferEntry `json:"entries"`
+}
+
+// MidnightMakerOfferEntry specifies the market, validity period, and tick or rate.
+type MidnightMakerOfferEntry struct {
+	MarketID  string `json:"market_id"`
+	StartsAt  uint64 `json:"starts_at"`
+	ExpiresAt uint64 `json:"expires_at"`
+	Tick      string `json:"tick,omitempty"`
+	RateWAD   string `json:"rate_wad,omitempty"`
+}
+
+// MidnightFundingSource identifies wallet funding or a variable rate market.
+type MidnightFundingSource struct {
+	Type     string `json:"type"`
+	MarketID string `json:"market_id,omitempty"`
+}
+
+func verifyMidnightTake(intent MidnightTakeIntent, calls []CalldataCall, chain Deployment) ([]DecodedCalldataCall, error) {
+	switch intent.Action {
+	case "midnight.take_borrow", "midnight.supply_collateral_take_borrow", "midnight.take_lend":
+	default:
+		return nil, unknownMidnightAction(calls)
+	}
+	return verifyMidnightCalls(MidnightMarketIntent{
+		CommonIntent: intent.CommonIntent, Amount: intent.Amount, Guard: intent.Guard, nullGuard: intent.nullGuard,
+		ReferralFee: intent.ReferralFee, Funding: intent.Funding, CollateralSupplies: intent.CollateralSupplies,
+	}, &intent, calls, chain)
+}
+
+func validGroup(group string) bool {
+	if len(group) != 66 || !strings.EqualFold(group[:2], "0x") {
 		return false
 	}
-	if len(prereqs) > 0 && (prereqs[0].Kind == "approval" || prereqs[0].Kind == "erc20_approval") {
-		call := prereqs[0]
-		token := common.HexToAddress(call.To)
-		a, ok := decode(methods["approve"], call, "", false)
-		n := number(a["amount"])
-		if !ok || call.Value != "0" || address(a["spender"]) != chain.Midnight ||
-			n == nil || n.Sign() <= 0 || (n.Cmp(maxUint256) != 0 && (n.Cmp(cap) > 0 || n.Cmp(maxUint96) == 0)) ||
-			chains[chain.ID].pinned(token) ||
-			chain.pinned(token) || !matchesWalletToken(body.MarketParams, token) {
-			return false
+	_, err := hex.DecodeString(group[2:])
+	return err == nil
+}
+
+func verifyMidnightOffer(intent MidnightOfferManagementIntent, calls []CalldataCall, chain Deployment) ([]DecodedCalldataCall, error) {
+	switch intent.Action {
+	case "midnight.make_borrow", "midnight.make_lend", "midnight.make_repay", "midnight.make_withdraw":
+		var first *CalldataCall
+		if len(calls) > 0 {
+			first = &calls[0]
 		}
-		prereqs = prereqs[1:]
+		return nil, &CalldataUnsupportedError{detail(intent.Action, first, nil)}
+	case "midnight.cancel_offers", "midnight.withdraw_funding":
+	default:
+		return nil, unknownMidnightAction(calls)
 	}
-	return midnightPrereqs(chain, body, prereqs, chain.MidnightBundlesV2, nil)
+	call, err := selectMain(calls, 1)
+	if err != nil {
+		return nil, err
+	}
+	if err := expectZeroValue(call); err != nil {
+		return nil, err
+	}
+	var decoded DecodedCalldataCall
+	if intent.Action == "midnight.cancel_offers" {
+		decoded, err = cancelMidnightOffers(intent, call, chain)
+	} else {
+		decoded, err = withdrawMidnightFunding(intent, call, chain)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []DecodedCalldataCall{decoded}, nil
 }
 
-func matchesWalletToken(raw json.RawMessage, token common.Address) bool {
-	if len(raw) == 0 {
-		return true
+func cancelMidnightOffers(intent MidnightOfferManagementIntent, call CalldataCall, chain Deployment) (DecodedCalldataCall, error) {
+	if err := target(call, chain.Midnight); err != nil {
+		return DecodedCalldataCall{}, err
 	}
-	var markets []struct {
-		LoanToken string `json:"loan_token"`
+	if intent.Groups == nil {
+		return DecodedCalldataCall{}, &CalldataTargetError{detail("groups", &call, nil)}
 	}
-	if json.Unmarshal(raw, &markets) != nil || len(markets) == 0 {
-		return false
-	}
-	for _, market := range markets {
-		if !nonzeroAddress(market.LoanToken) || common.HexToAddress(market.LoanToken) != token {
-			return false
+	groups := make(map[string]bool, len(intent.Groups))
+	for _, group := range intent.Groups {
+		if !validGroup(group) {
+			return DecodedCalldataCall{}, &CalldataTargetError{detail("groups", &call, nil)}
 		}
+		groups[strings.ToLower(group)] = true
 	}
-	return true
-}
-
-func (chain midnightDeployment) pinned(token common.Address) bool {
-	return token == chain.Blue || token == chain.Midnight || token == chain.MidnightBundlesV2 ||
-		token == chain.MidnightBlueBuyCallbackFactory || midnightRatifier(chain, "price", token) ||
-		midnightRatifier(chain, "rate", token)
-}
-
-func midnightRatifier(chain midnightDeployment, typ string, address common.Address) bool {
-	switch typ {
-	case "price":
-		return address == chain.PriceRatifierV1 || slices.Contains(chain.AdapterPriceRatifiersV1, address)
-	case "rate":
-		return address == chain.RateRatifierV1 || slices.Contains(chain.AdapterRateRatifiersV1, address)
+	if len(groups) == 0 || len(groups) != len(intent.Groups) {
+		return DecodedCalldataCall{}, callError("groups", &call)
 	}
-	return false
+	contract := defaultSnapshot.abis["midnight"]
+	decoded, err := decodeCall(call, contract, false)
+	if err != nil {
+		return DecodedCalldataCall{}, err
+	}
+	maxConsumed := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
+	check := func(entry DecodedCalldataCall) error {
+		leg := entry.Call
+		if entry.FunctionName != "setConsumed" {
+			return callError("function", &leg)
+		}
+		args := entry.Args
+		group := common.Hash(args[0].([32]byte)).Hex()
+		if !groups[group] {
+			return &CalldataTargetError{detail("groups", &leg, nil)}
+		}
+		delete(groups, group)
+		if args[1].(*big.Int).Cmp(maxConsumed) != 0 {
+			return amountError("consumed", leg)
+		}
+		return recipient(args[2].(common.Address), intent.Account, "on_behalf", leg)
+	}
+	if decoded.FunctionName != "multicall" {
+		if len(groups) != 1 {
+			return DecodedCalldataCall{}, callError("groups", &call)
+		}
+		return decoded, check(decoded)
+	}
+	children := decoded.Args[0].([][]byte)
+	if len(children) != len(groups) {
+		return DecodedCalldataCall{}, callError("groups", &call)
+	}
+	decoded.Calls = make([]DecodedCalldataCall, len(children))
+	for i, data := range children {
+		leg := innerCalldata(call, data, i)
+		entry, err := decodeCall(leg, contract, true)
+		if err != nil {
+			return DecodedCalldataCall{}, err
+		}
+		if err := check(entry); err != nil {
+			return DecodedCalldataCall{}, err
+		}
+		decoded.Calls[i] = entry
+	}
+	return decoded, nil
 }
 
-func stringsEqualHash(s string, expected common.Hash) bool {
-	b, ok := hexBytes(s, 32)
-	return ok && expected == common.Hash(b)
+func withdrawMidnightFunding(intent MidnightOfferManagementIntent, call CalldataCall, chain Deployment) (DecodedCalldataCall, error) {
+	if err := target(call, chain.Blue); err != nil {
+		return DecodedCalldataCall{}, err
+	}
+	decoded, err := decodeCall(call, defaultSnapshot.abis["blue"], false)
+	if err != nil {
+		return DecodedCalldataCall{}, err
+	}
+	if decoded.FunctionName != "withdraw" {
+		return DecodedCalldataCall{}, callError("function", &call)
+	}
+	args := decoded.Args
+	if !strings.EqualFold(blueMarketID(converted[blueMarketParams](args[0])), intent.FundingMarket) {
+		return DecodedCalldataCall{}, &CalldataTargetError{detail("funding_market", &call, nil)}
+	}
+	if !nonzeroAddress(intent.FundingAddress) {
+		return DecodedCalldataCall{}, &CalldataTargetError{detail("funding_address", &call, nil)}
+	}
+	if err := recipient(args[3].(common.Address), intent.FundingAddress, "funding_address", call); err != nil {
+		return DecodedCalldataCall{}, err
+	}
+	if err := recipient(args[4].(common.Address), intent.Account, "receiver", call); err != nil {
+		return DecodedCalldataCall{}, err
+	}
+	if args[1].(*big.Int).Sign() != 0 || args[2].(*big.Int).Sign() == 0 {
+		return DecodedCalldataCall{}, amountError("shares", call)
+	}
+	return decoded, nil
 }

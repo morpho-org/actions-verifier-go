@@ -1,499 +1,256 @@
-package verifier
+package calldataverifier
 
 import (
-	"bytes"
-	_ "embed"
-	"encoding/hex"
 	"encoding/json"
-	"math/big"
-	"strconv"
+	"fmt"
+	"reflect"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// Intent is the trusted request as originally sent to the Actions API.
-type Intent struct {
-	// Path is the concrete endpoint path, including the chain-qualified selector
-	// where required, not a route template or a full URL.
-	Path string `json:"path"`
-	// Body is the original JSON body, not the token and signatures sent to
-	// continue an action. Keep it independently of the API's response.
-	Body json.RawMessage `json:"body"`
-}
-
-// Call is an entry in the API's ordered data.calls list.
-type Call struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
-	To   string `json:"to"`
-	// Data is 0x-prefixed hexadecimal calldata.
-	Data string `json:"data"`
-	// Value is an unsigned decimal string in wei, including "0" for no value.
+// CalldataCall is an Actions API call in transaction order.
+type CalldataCall struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	To    string `json:"to"`
+	Data  string `json:"data"`
 	Value string `json:"value"`
 }
 
-// Verify reports whether calls pass the supported structural checks against
-// intent. Check that the API returned status "prepared", then pass its entire
-// data.calls list in order. Unsupported routes, chains and call shapes return
-// false. Verify rejects more than 128 calls, request bodies over 1 MiB, and
-// hexadecimal calldata strings over 2 MiB per call.
-//
-// Verify is synchronous and does not perform I/O or modify its inputs. It can
-// be called concurrently if callers do not mutate shared input memory.
-// A true result does not establish execution success; see the package
-// documentation for what remains the caller's responsibility.
-func Verify(intent Intent, calls []Call) bool {
-	return check(intent, calls)
-}
-
-//go:embed abi_blue_vault.json
-var baseABI []byte
-
-//go:embed chains_blue_vault.json
-var baseRegistry []byte
-
-type deployment struct {
-	ID            uint64         `json:"id"`
-	Blue          common.Address `json:"blue"`
-	BlueBundle    common.Address `json:"blue_bundle"`
-	VaultV1Bundle common.Address `json:"vault_v1_bundle"`
-	VaultV2Bundle common.Address `json:"vault_v2_bundle"`
-	VaultExit     common.Address `json:"vault_exit"`
-	Wrapped       common.Address `json:"wrapped"`
-}
-
-var methods = loadABI(baseABI)
-var chains = loadChains(baseRegistry)
-var zeroAddress common.Address
-var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
-var maxUint96 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 96), big.NewInt(1))
-
-func loadABI(source []byte) map[string]abi.Method {
-	var entries []struct {
-		Key      string
-		Selector string
-		Method   json.RawMessage
+// UnmarshalJSON rejects absent or non-string call IDs and kinds.
+func (c *CalldataCall) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+		return callError("calls", nil)
 	}
-	if err := json.Unmarshal(source, &entries); err != nil {
-		panic(err)
+	var id, kind *string
+	if err := json.Unmarshal(fields["id"], &id); err != nil || id == nil {
+		return callError("id", nil)
 	}
-	methods := make(map[string]abi.Method)
-	for _, entry := range entries {
-		parsed, err := abi.JSON(strings.NewReader("[" + string(entry.Method) + "]"))
-		if err != nil {
-			panic(err)
-		}
-		for name, method := range parsed.Methods {
-			if "0x"+hex.EncodeToString(method.ID) != entry.Selector {
-				panic("selector mismatch: " + name)
+	call := CalldataCall{ID: *id}
+	if err := json.Unmarshal(fields["kind"], &kind); err != nil || kind == nil {
+		return callError("kind", &call)
+	}
+	call.Kind = *kind
+	for _, field := range []struct {
+		name  string
+		value *string
+	}{{"to", &call.To}, {"data", &call.Data}, {"value", &call.Value}} {
+		if raw := fields[field.name]; raw != nil {
+			if err := json.Unmarshal(raw, field.value); err != nil {
+				return err
 			}
-			if entry.Key != "" {
-				name = entry.Key
-			}
-			methods[name] = method
 		}
 	}
-	return methods
-}
-
-func loadChains(source []byte) map[uint64]deployment {
-	var entries []deployment
-	if err := json.Unmarshal(source, &entries); err != nil {
-		panic(err)
-	}
-	chains := make(map[uint64]deployment, len(entries))
-	for _, entry := range entries {
-		chains[entry.ID] = entry
-	}
-	return chains
-}
-
-type amount struct {
-	Unit  string `json:"unit"`
-	Value string `json:"value"`
-}
-
-type request struct {
-	Account         string `json:"account"`
-	ChainID         uint64 `json:"chain_id"`
-	Amount          amount `json:"amount"`
-	Collateral      amount `json:"collateral_amount"`
-	Destination     string `json:"destination_market"`
-	Market          string `json:"market"`
-	MidnightID      string `json:"market_id"`
-	CollateralToken struct {
-		Address string `json:"address"`
-	} `json:"collateral"`
-	Supplies    []collateralChange `json:"collateral_supplies"`
-	Withdrawals []collateralChange `json:"collateral_withdrawals"`
-	Maker       string             `json:"maker"`
-	Groups      []string           `json:"groups"`
-	Type        string             `json:"type"`
-	Guard       struct {
-		Type  string `json:"type"`
-		Value string `json:"value"`
-	} `json:"guard"`
-	FundingAddress string          `json:"funding_address"`
-	FundingMarket  string          `json:"funding_market"`
-	MarketParams   json.RawMessage `json:"market_params"`
-	FundingSource  struct {
-		Type   string `json:"type"`
-		Market string `json:"market_id"`
-	} `json:"funding_source"`
-	Offers struct {
-		Type    string `json:"type"`
-		Entries []struct {
-			Market string `json:"market_id"`
-		} `json:"entries"`
-	} `json:"offers"`
-	Expires uint64 `json:"expires_at"`
-	Origin  string `json:"calldata_origin"`
-	Funding struct {
-		Type      string `json:"type"`
-		MaxNative string `json:"max_native_assets"`
-	} `json:"funding"`
-	Fee struct {
-		BPS       uint64 `json:"bps"`
-		Recipient string `json:"recipient"`
-	} `json:"referral_fee"`
-}
-
-type route struct {
-	family, action, selector string
-	chain                    uint64
-}
-
-func check(intent Intent, calls []Call) bool {
-	if len(calls) == 0 || len(calls) > 128 || len(intent.Body) > 1<<20 {
-		return false
-	}
-	var body request
-	if json.Unmarshal(intent.Body, &body) != nil || !nonzeroAddress(body.Account) {
-		return false
-	}
-	r, ok := parseRoute(intent.Path, body.ChainID)
-	if !ok {
-		return false
-	}
-	ids := make(map[string]bool, len(calls))
-	for _, call := range calls {
-		if !validCall(call) || ids[call.ID] {
-			return false
-		}
-		ids[call.ID] = true
-	}
-	if strings.HasPrefix(r.family, "midnight/") {
-		return verifyMidnight(r, body, calls)
-	}
-	chain, ok := chains[r.chain]
-	if !ok {
-		return false
-	}
-	switch r.family {
-	case "blue":
-		return verifyBlue(r, chain, body, calls)
-	case "vaults-v1", "vaults-v2":
-		return verifyVault(r, chain, body, calls)
-	}
-	return false
-}
-
-func parseRoute(path string, bodyChain uint64) (route, bool) {
-	parts := strings.Split(strings.TrimPrefix(path, "/v0/actions/"), "/")
-	if !strings.HasPrefix(path, "/v0/actions/") || len(parts) < 3 {
-		return route{}, false
-	}
-	r := route{family: parts[0]}
-	switch r.family {
-	case "midnight":
-		r.family += "/" + parts[1]
-		switch parts[1] {
-		case "markets", "offer-groups":
-			if len(parts) != 4 {
-				return route{}, false
-			}
-			r.chain, r.selector = splitSelector(parts[2])
-			if _, ok := hexBytes(r.selector, 32); !ok {
-				return route{}, false
-			}
-			r.action = parts[3]
-		case "offers":
-			r.chain = bodyChain
-			if len(parts) == 3 {
-				r.action = parts[2]
-			} else if len(parts) == 4 && parts[2] == "funding" && parts[3] == "withdraw" {
-				r.action = "funding/withdraw"
-			} else {
-				return route{}, false
-			}
-		default:
-			return route{}, false
-		}
-	case "blue":
-		if len(parts) != 4 || parts[1] != "markets" {
-			return route{}, false
-		}
-		r.action = parts[3]
-		r.chain, r.selector = splitSelector(parts[2])
-		if _, ok := hexBytes(r.selector, 32); !ok {
-			return route{}, false
-		}
-	case "vaults-v1", "vaults-v2":
-		if len(parts) != 3 {
-			return route{}, false
-		}
-		r.action = parts[2]
-		r.chain, r.selector = splitSelector(parts[1])
-		if !nonzeroAddress(r.selector) {
-			return route{}, false
-		}
-	default:
-		return route{}, false
-	}
-	return r, r.chain != 0 && (bodyChain == 0 || r.chain == bodyChain)
-}
-
-func splitSelector(selector string) (uint64, string) {
-	raw, value, ok := strings.Cut(strings.NewReplacer("%3A", ":", "%3a", ":").Replace(selector), ":")
-	chain, err := strconv.ParseUint(raw, 10, 53)
-	if !ok || err != nil || strconv.FormatUint(chain, 10) != raw {
-		return 0, ""
-	}
-	return chain, value
-}
-
-func validCall(call Call) bool {
-	id, ok := strings.CutPrefix(call.ID, "call_")
-	validID := id != "" && strings.Trim(id, "0123456789") == ""
-	_, validValue := decimal(call.Value)
-	return ok && validID && validValue && nonzeroAddress(call.To) && len(call.Data) <= 2<<20
-}
-
-func decimal(s string) (*big.Int, bool) {
-	if len(s) == 0 || len(s) > 78 || (len(s) > 1 && s[0] == '0') {
-		return nil, false
-	}
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return nil, false
-		}
-	}
-	n, ok := new(big.Int).SetString(s, 10)
-	return n, ok && n.BitLen() <= 256
-}
-
-func nonzeroAddress(s string) bool {
-	return len(s) == 42 && strings.HasPrefix(s, "0x") && common.IsHexAddress(s) && common.HexToAddress(s) != zeroAddress
-}
-
-func hexBytes(s string, size int) ([]byte, bool) {
-	if !strings.HasPrefix(s, "0x") || (size >= 0 && len(s) != 2+2*size) {
-		return nil, false
-	}
-	b, err := hex.DecodeString(s[2:])
-	return b, err == nil
-}
-
-func decode(method abi.Method, call Call, origin string, final bool) (map[string]any, bool) {
-	data, ok := hexBytes(call.Data, -1)
-	if !ok || len(data) < 4 || !bytes.Equal(data[:4], method.ID) {
-		return nil, false
-	}
-	args := data[4:]
-	if final && origin != "" {
-		expected, valid := hexBytes(origin, 4)
-		suffix := len(args) % 32
-		if !valid || (suffix != 8 && suffix != 12) || !bytes.Equal(args[len(args)-suffix+4:len(args)-suffix+8], expected) {
-			return nil, false
-		}
-	}
-	if suffix := len(args) % 32; suffix != 0 {
-		if !final || (suffix != 8 && suffix != 12) {
-			return nil, false
-		}
-		args = args[:len(args)-suffix]
-	}
-	if !canonicalABILayout(method.Inputs, args) {
-		return nil, false
-	}
-	values, err := method.Inputs.Unpack(args)
-	if err != nil {
-		return nil, false
-	}
-	canonical, err := method.Inputs.Pack(values...)
-	if err != nil || !bytes.Equal(args, canonical) {
-		return nil, false
-	}
-	result := make(map[string]any, len(values))
-	for i, arg := range method.Inputs {
-		result[arg.Name] = values[i]
-	}
-	return result, true
-}
-
-func number(v any) *big.Int {
-	switch n := v.(type) {
-	case *big.Int:
-		return n
-	case uint8:
-		return new(big.Int).SetUint64(uint64(n))
-	case uint16:
-		return new(big.Int).SetUint64(uint64(n))
-	case uint32:
-		return new(big.Int).SetUint64(uint64(n))
-	case uint64:
-		return new(big.Int).SetUint64(n)
-	}
+	*c = call
 	return nil
 }
 
-func eq(v any, want *big.Int) bool {
-	n := number(v)
-	return n != nil && want != nil && n.Cmp(want) == 0
+// DecodedCalldataCall contains the checked call, ABI arguments, and checked children.
+type DecodedCalldataCall struct {
+	Call         CalldataCall          `json:"call"`
+	FunctionName string                `json:"functionName"`
+	Args         []any                 `json:"args"`
+	Calls        []DecodedCalldataCall `json:"calls,omitempty"`
 }
 
-func uintEq(v any, want uint64) bool {
-	return eq(v, new(big.Int).SetUint64(want))
+// CommonIntent is the caller's chain, account, and fee policy.
+type CommonIntent struct {
+	Action         string `json:"action"`
+	ChainID        uint64 `json:"chain_id"`
+	Account        string `json:"account"`
+	MaxFeeBPS      int    `json:"max_fee_bps"`
+	CalldataOrigin string `json:"calldata_origin,omitempty"`
 }
 
-func positive(v any) bool {
-	n := number(v)
-	return n != nil && n.Sign() > 0
+// Amount specifies a unit and, except for "all", a decimal integer.
+type Amount struct {
+	Unit  string `json:"unit"`
+	Value string `json:"value,omitempty"`
 }
 
-func marketMatches(method abi.Method, name string, value any, selector string) bool {
-	for _, input := range method.Inputs {
-		if input.Name == name {
-			packed, err := (abi.Arguments{input}).Pack(value)
-			return err == nil && strings.EqualFold(crypto.Keccak256Hash(packed).Hex(), selector)
+// Funding describes permitted funding and the caller's native value limit.
+type Funding struct {
+	Type            string `json:"type"`
+	MaxNativeAssets string `json:"max_native_assets,omitempty"`
+}
+
+// ReferralFee specifies the maximum referral fee and its intended recipient.
+type ReferralFee struct {
+	BPS       int    `json:"bps"`
+	Recipient string `json:"recipient"`
+}
+
+// VaultCalldataIntent describes a Vault V1 or V2 action. Asset must come from
+// a trusted source independent of the calldata response.
+type VaultCalldataIntent struct {
+	CommonIntent
+	Vault         string       `json:"vault"`
+	Asset         string       `json:"asset"`
+	Amount        Amount       `json:"amount"`
+	Funding       *Funding     `json:"funding,omitempty"`
+	ReferralFee   *ReferralFee `json:"referral_fee,omitempty"`
+	ExpiresAt     *uint64      `json:"expires_at,omitempty"`
+	SignatureMode string       `json:"signature_mode,omitempty"`
+	SlippageBPS   *int         `json:"slippage_bps,omitempty"`
+	MaxPenaltyBPS *int         `json:"max_penalty_bps,omitempty"`
+	Market        string       `json:"market,omitempty"`
+}
+
+// CalldataIntent is the original request augmented with a chain and fee policy.
+type CalldataIntent interface {
+	calldataIntent() CommonIntent
+}
+
+func (i VaultCalldataIntent) calldataIntent() CommonIntent { return i.CommonIntent }
+
+// VerifyOptions provides caller-owned verification configuration.
+type VerifyOptions struct {
+	Registry *Registry
+	Proof    *ActionProofInput
+}
+
+// VerifyCalldata checks ordered Actions API calls against an independently
+// retained intent, without simulation, network access, or input mutation.
+// When Proof is supplied, it authenticates the calls before the static checks.
+func VerifyCalldata(intent CalldataIntent, calls []CalldataCall, options ...VerifyOptions) ([]DecodedCalldataCall, error) {
+	if len(options) > 1 {
+		return nil, callError("options", nil)
+	}
+	if intent == nil || (reflect.ValueOf(intent).Kind() == reflect.Pointer && reflect.ValueOf(intent).IsNil()) {
+		return nil, callError("action", nil)
+	}
+	commonIntent := intent.calldataIntent()
+	if len(options) != 0 && options[0].Proof != nil {
+		var err error
+		calls, err = authenticateCalls(*options[0].Proof, calls, commonIntent.ChainID)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return false
-}
-
-func address(v any) common.Address {
-	if a, ok := v.(common.Address); ok {
-		return a
+	var first *CalldataCall
+	if len(calls) != 0 {
+		first = &calls[0]
 	}
-	return zeroAddress
-}
-
-func (d deployment) pinned(a common.Address) bool {
-	return a == d.Blue || a == d.BlueBundle || a == d.VaultV1Bundle ||
-		a == d.VaultV2Bundle || a == d.VaultExit
-}
-
-func callTo(call Call, target common.Address) bool {
-	return target != zeroAddress && common.HexToAddress(call.To) == target
-}
-
-func amounts(selected amount, args map[string]any, assets, shares string, dynamicAll bool) bool {
-	n, ok := decimal(selected.Value)
-	switch selected.Unit {
-	case "assets":
-		return ok && n.Sign() > 0 && eq(args[assets], n) && (shares == "" || uintEq(args[shares], 0))
-	case "shares":
-		return shares != "" && ok && n.Sign() > 0 && n.Cmp(maxUint256) < 0 && uintEq(args[assets], 0) && eq(args[shares], n)
-	case "all":
-		return selected.Value == "" && shares != "" && uintEq(args[assets], 0) &&
-			(eq(args[shares], maxUint256) || (dynamicAll && positive(args[shares])))
+	chains := defaultSnapshot.Deployments
+	if len(options) != 0 && options[0].Registry != nil && options[0].Registry.chains != nil {
+		chains = options[0].Registry.chains
 	}
-	return false
-}
-
-func limits(body request, args map[string]any) bool {
-	if d, exists := args["deadline"]; exists {
-		if !positive(d) || (body.Expires != 0 && !uintEq(d, body.Expires)) {
-			return false
+	chain, ok := chains[commonIntent.ChainID]
+	if commonIntent.ChainID == 0 || commonIntent.ChainID > 1<<53-1 {
+		return nil, &CalldataChainError{detail("chain_id", first, nil)}
+	}
+	if !ok {
+		cause := fmt.Errorf("unsupported chain ID %d", commonIntent.ChainID)
+		return nil, &CalldataChainError{detail("chain_id", first, cause)}
+	}
+	if !nonzeroAddress(commonIntent.Account) {
+		return nil, &CalldataRecipientError{detail("account", first, nil)}
+	}
+	var vault *VaultCalldataIntent
+	switch i := intent.(type) {
+	case VaultCalldataIntent:
+		vault = &i
+	case *VaultCalldataIntent:
+		vault = i
+	}
+	if vault != nil && !nonzeroAddress(vault.Vault) {
+		return nil, &CalldataTargetError{detail("vault", first, nil)}
+	}
+	if commonIntent.MaxFeeBPS < 0 || commonIntent.MaxFeeBPS > 10_000 {
+		return nil, &CalldataFeeError{detail("max_fee_bps", first, nil)}
+	}
+	for i := range calls {
+		if !nonzeroAddress(calls[i].To) {
+			return nil, &CalldataTargetError{detail("to", &calls[i], nil)}
 		}
 	}
-	if fee, exists := args["referralFeePct"]; exists {
-		pct := new(big.Int).Mul(new(big.Int).SetUint64(body.Fee.BPS), big.NewInt(100000000000000))
-		if body.Fee.BPS > 10000 || !eq(fee, pct) || address(args["referralFeeRecipient"]) != common.HexToAddress(body.Fee.Recipient) {
-			return false
-		}
-		if body.Fee.Recipient != "" && !nonzeroAddress(body.Fee.Recipient) {
-			return false
-		}
+	if vault != nil {
+		return verifyVault(*vault, calls, chain)
 	}
-	return true
+	switch i := intent.(type) {
+	case BlueCalldataIntent:
+		return verifyBlue(i, calls, chain)
+	case *BlueCalldataIntent:
+		return verifyBlue(*i, calls, chain)
+	case MidnightMarketIntent:
+		return verifyMidnight(i, calls, chain)
+	case *MidnightMarketIntent:
+		return verifyMidnight(*i, calls, chain)
+	case MidnightTakeIntent:
+		return verifyMidnightTake(i, calls, chain)
+	case *MidnightTakeIntent:
+		return verifyMidnightTake(*i, calls, chain)
+	case MidnightOfferManagementIntent:
+		return verifyMidnightOffer(i, calls, chain)
+	case *MidnightOfferManagementIntent:
+		return verifyMidnightOffer(*i, calls, chain)
+	}
+	return nil, callError("action", first)
 }
 
-func funding(body request, value string, token common.Address, chain deployment, maximum *big.Int) bool {
-	switch body.Funding.Type {
-	case "erc20":
-		return value == "0" && body.Funding.MaxNative == ""
-	case "auto", "native":
-	default:
-		return false
-	}
-	cap, ok := decimal(body.Funding.MaxNative)
-	actual, valid := decimal(value)
-	if !ok || !valid || maximum == nil || cap.Cmp(actual) < 0 {
-		return false
-	}
-	if actual.Sign() == 0 {
-		return body.Funding.Type == "auto"
-	}
-	return actual.Cmp(maximum) == 0 && (token == zeroAddress || token == chain.Wrapped) && chain.Wrapped != zeroAddress
+func validAddress(s string) bool {
+	return len(s) == 42 && strings.HasPrefix(s, "0x") && common.IsHexAddress(s)
 }
 
-func prerequisites(calls []Call, chain deployment, bundle, token common.Address, maximum *big.Int, authorization bool) bool {
-	var approvals int
-	var authorized bool
-	for i, call := range calls {
-		if call.Value != "0" {
-			return false
-		}
-		switch call.Kind {
-		case "approval":
-			if authorized || maximum == nil {
-				return false
-			}
-			args, ok := decode(methods["approve"], call, "", false)
-			if !ok || address(args["spender"]) != bundle {
-				return false
-			}
-			approvals++
-			n := number(args["amount"])
-			if n == nil {
-				return false
-			}
-			if token == zeroAddress {
-				target := common.HexToAddress(call.To)
-				if len(calls) > 2 || target == bundle || chain.pinned(target) || midnightChains[chain.ID].pinned(target) {
-					return false
-				}
-				if n.Sign() == 0 {
-					if i != 0 || len(calls) != 2 || calls[1].Kind != "approval" || !callTo(calls[1], target) {
-						return false
-					}
-				} else if i != len(calls)-1 || (n.Cmp(maxUint256) != 0 && (n.Cmp(maximum) > 0 || n.Cmp(maxUint96) == 0)) {
-					return false
-				}
-				continue
-			}
-			if !callTo(call, token) || approvals > 2 ||
-				(n.Sign() == 0 && (i != 0 || len(calls) <= 1 || calls[i+1].Kind != "approval")) ||
-				(n.Sign() > 0 && i+1 < len(calls) && calls[i+1].Kind == "approval") ||
-				(n.Sign() > 0 && n.Cmp(maximum) != 0 && n.Cmp(maxUint256) != 0 && n.Cmp(maxUint96) != 0) {
-				return false
-			}
-		case "authorization":
-			if authorized || !authorization || !callTo(call, chain.Blue) {
-				return false
-			}
-			a, ok := decode(methods["setAuthorization"], call, "", false)
-			if !ok || address(a["authorized"]) != bundle || a["newIsAuthorized"] != true {
-				return false
-			}
-			authorized = true
-		default:
-			return false
-		}
+func nonzeroAddress(s string) bool {
+	return validAddress(s) && common.HexToAddress(s) != (common.Address{})
+}
+
+type errorDetail struct {
+	Field  string
+	CallID *string
+	cause  error
+}
+
+func detail(field string, call *CalldataCall, cause error) errorDetail {
+	e := errorDetail{Field: field, cause: cause}
+	if call != nil {
+		id := call.ID
+		e.CallID = &id
 	}
-	return true
+	return e
+}
+
+func (e errorDetail) Error() string {
+	if e.CallID == nil {
+		return fmt.Sprintf("Cannot verify \"%s\". Check the original intent and supplied calls.", e.Field)
+	}
+	return fmt.Sprintf("Cannot verify \"%s\" in call \"%s\". Do not sign this call.", e.Field, *e.CallID)
+}
+
+func (e errorDetail) Unwrap() error { return e.cause }
+
+func (e errorDetail) location() errorDetail { return e }
+
+// CalldataChainError means the intended chain has no usable registry entry.
+type CalldataChainError struct{ errorDetail }
+
+// CalldataTargetError means a target or market is not the intended one.
+type CalldataTargetError struct{ errorDetail }
+
+// CalldataDecodeError means the bytes are not canonical for the expected ABI.
+type CalldataDecodeError struct{ errorDetail }
+
+// CalldataCallError means a call or action is missing, unexpected, or out of order.
+type CalldataCallError struct{ errorDetail }
+
+// CalldataAmountError means a transaction amount differs from the intent.
+type CalldataAmountError struct{ errorDetail }
+
+// CalldataRecipientError means an owner or recipient differs from the intent.
+type CalldataRecipientError struct{ errorDetail }
+
+// CalldataFeeError means the fee or its recipient is not authorized.
+type CalldataFeeError struct{ errorDetail }
+
+// CalldataUnsupportedError means an action variant cannot be checked locally.
+type CalldataUnsupportedError struct{ errorDetail }
+
+// CalldataProofError means an Actions API proof is invalid or does not authorize the calls.
+type CalldataProofError struct{ errorDetail }
+
+func callError(field string, call *CalldataCall) error {
+	return &CalldataCallError{detail(field, call, nil)}
 }

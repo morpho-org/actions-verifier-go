@@ -1,4 +1,4 @@
-module github.com/morpho-org/actions-verifier-go
+module github.com/morpho-org/calldata-verifier-go
 
 go 1.25.1
 

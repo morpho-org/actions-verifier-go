@@ -1,9 +1,10 @@
-package verifier
+package calldataverifier
 
 import (
-	_ "embed"
-	"encoding/hex"
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"math"
 	"math/big"
 	"reflect"
 	"strings"
@@ -13,427 +14,696 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-//go:embed abi_midnight.json
-var midnightABI []byte
-
-//go:embed chains_midnight.json
-var midnightRegistry []byte
-
-const (
-	buyAssets     = "midnightBundlesV2BuyWithAssetsTargetAndWithdrawCollateral"
-	buyUnits      = "midnightBundlesV2BuyWithUnitsTargetAndWithdrawCollateral"
-	sellAssets    = "midnightBundlesV2SupplyCollateralAndSellWithAssetsTarget"
-	sellUnits     = "midnightBundlesV2SupplyCollateralAndSellWithUnitsTarget"
-	cancelAndMake = "midnightBundlesV2CancelAndMake"
-)
-
-type midnightDeployment struct {
-	ID                                               uint64
-	Blue, Midnight, MidnightBundlesV2, WrappedNative common.Address
-	PriceRatifierV1, RateRatifierV1                  common.Address
-	AdapterPriceRatifiersV1, AdapterRateRatifiersV1  []common.Address
-	MidnightBlueBuyCallbackFactory                   common.Address
+// MidnightGuard specifies the caller's slippage or explicit execution bound.
+type MidnightGuard struct {
+	Type  string `json:"type"`
+	BPS   int    `json:"bps,omitempty"`
+	Value string `json:"value,omitempty"`
 }
 
-type collateralChange struct {
-	Collateral struct {
-		Address string `json:"address"`
-	} `json:"collateral"`
-	Amount amount `json:"amount"`
+// MidnightCollateral identifies the collateral token in a market.
+type MidnightCollateral struct {
+	Address string `json:"address"`
 }
 
-var midnightMethods = loadABI(midnightABI)
-var midnightChains = func() map[uint64]midnightDeployment {
-	var rows []midnightDeployment
-	if err := json.Unmarshal(midnightRegistry, &rows); err != nil {
-		panic(err)
+// MidnightCollateralTransfer describes one requested supply or withdrawal.
+type MidnightCollateralTransfer struct {
+	Collateral MidnightCollateral `json:"collateral"`
+	Amount     Amount             `json:"amount"`
+}
+
+// MidnightMarketParams describes the optional market parameters in a prepared intent.
+type MidnightMarketParams struct {
+	LoanToken      string                     `json:"loan_token"`
+	Maturity       uint64                     `json:"maturity"`
+	RCFThreshold   string                     `json:"rcf_threshold"`
+	EnterGate      string                     `json:"enter_gate"`
+	LiquidatorGate string                     `json:"liquidator_gate"`
+	Collaterals    []MidnightCollateralParams `json:"collaterals"`
+}
+
+// MidnightCollateralParams describes the market's parameters for one collateral token.
+type MidnightCollateralParams struct {
+	Token             string `json:"token"`
+	LLTV              string `json:"lltv"`
+	LiquidationCursor string `json:"liquidation_cursor"`
+	Oracle            string `json:"oracle"`
+}
+
+// MidnightMarketIntent describes a Midnight borrow, lend, repay, withdrawal,
+// redemption, or collateral action.
+type MidnightMarketIntent struct {
+	CommonIntent
+	Market                                   string                       `json:"market"`
+	ExpiresAt                                *uint64                      `json:"expires_at,omitempty"`
+	Type                                     string                       `json:"type,omitempty"`
+	Amount                                   Amount                       `json:"amount,omitempty"`
+	Guard                                    *MidnightGuard               `json:"guard,omitempty"`
+	MarketParams                             *MidnightMarketParams        `json:"market_params,omitempty"`
+	Funding                                  *Funding                     `json:"funding,omitempty"`
+	ReferralFee                              *ReferralFee                 `json:"referral_fee,omitempty"`
+	AllowPartial                             *bool                        `json:"allow_partial,omitempty"`
+	Collateral                               MidnightCollateral           `json:"collateral,omitempty"`
+	CollateralSupplies                       []MidnightCollateralTransfer `json:"collateral_supplies,omitempty"`
+	CollateralWithdrawals                    []MidnightCollateralTransfer `json:"collateral_withdrawals,omitempty"`
+	nullGuard, nullSupplies, nullWithdrawals bool
+}
+
+func (i MidnightMarketIntent) calldataIntent() CommonIntent { return i.CommonIntent }
+
+// UnmarshalJSON preserves the distinction between omitted and null guards and collateral lists.
+func (i *MidnightMarketIntent) UnmarshalJSON(data []byte) error {
+	type fields MidnightMarketIntent
+	var decoded fields
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
 	}
-	result := make(map[uint64]midnightDeployment, len(rows))
-	for _, row := range rows {
-		result[row.ID] = row
+	var raw struct {
+		Guard       json.RawMessage `json:"guard"`
+		Supplies    json.RawMessage `json:"collateral_supplies"`
+		Withdrawals json.RawMessage `json:"collateral_withdrawals"`
 	}
-	return result
-}()
-var maxUint128 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
-
-func field(v any, name string) any {
-	return reflect.ValueOf(v).FieldByName(name).Interface()
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	decoded.nullGuard = string(raw.Guard) == "null"
+	decoded.nullSupplies = string(raw.Supplies) == "null"
+	decoded.nullWithdrawals = string(raw.Withdrawals) == "null"
+	*i = MidnightMarketIntent(decoded)
+	return nil
 }
 
-func midnightMarketID(m abi.Method, market any) common.Hash {
-	for _, arg := range m.Inputs {
-		if arg.Name != "market" {
-			continue
+type midnightMarket struct {
+	ChainId                   *big.Int
+	Midnight, LoanToken       common.Address
+	CollateralParams          []midnightCollateral
+	Maturity, RcfThreshold    *big.Int
+	EnterGate, LiquidatorGate common.Address
+}
+
+type midnightCollateral struct {
+	Token                   common.Address
+	Lltv, LiquidationCursor *big.Int
+	Oracle                  common.Address
+}
+
+type midnightTransfer struct {
+	CollateralIndex, Assets *big.Int
+}
+
+type midnightPull struct {
+	token  common.Address
+	assets *big.Int
+}
+
+type midnightContext struct {
+	intent MidnightMarketIntent
+	chain  Deployment
+	call   CalldataCall
+	take   *MidnightTakeIntent
+}
+
+func (c midnightContext) market(raw any) (midnightMarket, error) {
+	market := converted[midnightMarket](raw)
+	err := func(cause error) error { return &CalldataTargetError{detail("market", &c.call, cause)} }
+	if !market.ChainId.IsUint64() || market.ChainId.Uint64() != c.intent.ChainID || !sameAddress(market.Midnight.Hex(), c.chain.Midnight) {
+		return market, err(nil)
+	}
+	for i, collateral := range market.CollateralParams {
+		if i > 0 && bytes.Compare(market.CollateralParams[i-1].Token[:], collateral.Token[:]) >= 0 {
+			return market, err(nil)
 		}
-		encoded, err := (abi.Arguments{arg}).Pack(market)
-		if err != nil {
-			return common.Hash{}
-		}
-		prefix, _ := hex.DecodeString("600b380380600b5f395ff3")
-		creation := crypto.Keccak256(prefix, encoded)
-		dispatch := address(field(market, "Midnight"))
-		return crypto.Keccak256Hash([]byte{255}, dispatch[:], make([]byte, 32), creation)
 	}
-	return common.Hash{}
+	if count := len(market.CollateralParams); count < 1 || count > 128 {
+		return market, err(fmt.Errorf("invalid collateral count: %d", count))
+	}
+	for _, collateral := range market.CollateralParams {
+		if !validMidnightCollateral(collateral) {
+			return market, err(fmt.Errorf("invalid parameters for collateral %s", collateral.Token.Hex()))
+		}
+	}
+	method := defaultSnapshot.abis["midnight"].Methods["withdraw"]
+	encoded, cause := abi.Arguments{method.Inputs[0]}.Pack(raw)
+	if cause != nil {
+		return market, err(cause)
+	}
+	prefix := common.FromHex("0x600b380380600b5f395ff3")
+	creationHash := crypto.Keccak256(prefix, encoded)
+	id := crypto.Keccak256Hash([]byte{255}, market.Midnight[:], make([]byte, 32), creationHash)
+	selector := c.intent.Market
+	if c.take != nil {
+		selector = *c.take.MarketID
+	}
+	if !strings.EqualFold(id.Hex(), selector) {
+		return market, err(nil)
+	}
+	return market, nil
 }
 
-func midnightMarket(m abi.Method, market any, chain midnightDeployment, id string) bool {
-	return uintEq(field(market, "ChainId"), chain.ID) &&
-		address(field(market, "Midnight")) == chain.Midnight &&
-		address(field(market, "LoanToken")) != zeroAddress &&
-		(id == "" || strings.EqualFold(midnightMarketID(m, market).Hex(), id))
-}
-
-func verifyMidnight(r route, body request, calls []Call) bool {
-	chain, ok := midnightChains[r.chain]
-	if !ok {
+func validMidnightCollateral(collateral midnightCollateral) bool {
+	if collateral.Lltv.Cmp(wad) > 0 || collateral.LiquidationCursor.Cmp(wad) >= 0 {
 		return false
 	}
-	final := calls[len(calls)-1]
-	prereqs := calls[:len(calls)-1]
-	switch r.family {
-	case "midnight/offers":
-		return midnightOffer(r.action, chain, body, final, prereqs)
-	case "midnight/offer-groups":
-		if r.action != "take" {
-			return false
+	gap := new(big.Int).Sub(wad, collateral.Lltv)
+	gap.Mul(gap, collateral.LiquidationCursor).Quo(gap, wad)
+	denominator := new(big.Int).Sub(wad, gap)
+	limit := new(big.Int).Mul(wad, wad)
+	lif := new(big.Int).Quo(limit, denominator)
+	if lif.Cmp(new(big.Int).Lsh(wad, 1)) > 0 {
+		return false
+	}
+	product := new(big.Int).Mul(collateral.Lltv, lif)
+	bound := new(big.Int).Mul(wad, big.NewInt(999_000_000_000_000_000))
+	return collateral.Lltv.Cmp(wad) == 0 || product.Cmp(bound) <= 0
+}
+
+func verifyMidnight(intent MidnightMarketIntent, calls []CalldataCall, chain Deployment) ([]DecodedCalldataCall, error) {
+	switch intent.Action {
+	case "midnight.borrow", "midnight.lend", "midnight.repay", "midnight.market_repay", "midnight.withdraw", "midnight.redeem", "midnight.supply_collateral", "midnight.withdraw_collateral":
+	default:
+		return nil, unknownMidnightAction(calls)
+	}
+	return verifyMidnightCalls(intent, nil, calls, chain)
+}
+
+func verifyMidnightCalls(intent MidnightMarketIntent, take *MidnightTakeIntent, calls []CalldataCall, chain Deployment) ([]DecodedCalldataCall, error) {
+	call, err := selectMain(calls, math.MaxInt)
+	if err != nil {
+		return nil, err
+	}
+	if (intent.Action == "midnight.repay" && intent.Type != "direct") || (intent.Action == "midnight.market_repay" && intent.Type != "market") {
+		return nil, callError("type", &call)
+	}
+	if intent.Action == "midnight.supply_collateral_take_borrow" && len(intent.CollateralSupplies) == 0 {
+		return nil, callError("collateral_supplies", &call)
+	}
+	c := midnightContext{intent, chain, call, take}
+	if err := c.checkGuardType(); err != nil {
+		return nil, err
+	}
+	if take != nil {
+		if take.MarketID == nil {
+			return nil, &CalldataUnsupportedError{detail("market_id", &call, nil)}
 		}
-	case "midnight/markets":
-		switch r.action {
-		case "supply-collateral":
-			return midnightDirect(r, chain, body, final, prereqs)
-		case "withdraw":
-			if final.Kind == "redeem" {
-				return midnightDirect(r, chain, body, final, prereqs)
+		if !validGroup(take.Group) {
+			return nil, &CalldataTargetError{detail("group", &call, nil)}
+		}
+	}
+	prefix := calls[:len(calls)-1]
+	if sameAddress(call.To, chain.Midnight) {
+		return c.core(prefix)
+	}
+	if err := target(call, chain.MidnightBundlesV2); err != nil {
+		return nil, err
+	}
+	decoded, err := decodeCall(call, defaultSnapshot.abis["midnightBundle"], false)
+	if err != nil {
+		return nil, err
+	}
+	var pulls []midnightPull
+	switch decoded.FunctionName {
+	case "midnightBundlesV2BuyWithAssetsTargetAndWithdrawCollateral":
+		pulls, err = c.buy(decoded.Args, "assets")
+	case "midnightBundlesV2BuyWithUnitsTargetAndWithdrawCollateral":
+		pulls, err = c.buy(decoded.Args, "units")
+	case "midnightBundlesV2SupplyCollateralAndSellWithAssetsTarget":
+		pulls, err = c.sell(decoded.Args, "assets")
+	case "midnightBundlesV2SupplyCollateralAndSellWithUnitsTarget":
+		pulls, err = c.sell(decoded.Args, "units")
+	default:
+		err = callError("function", &call)
+	}
+	if err != nil {
+		return nil, err
+	}
+	checked, err := c.prerequisites(prefix, pulls, true)
+	if err != nil {
+		return nil, err
+	}
+	return append(checked, decoded), nil
+}
+
+func unknownMidnightAction(calls []CalldataCall) error {
+	if len(calls) > 0 {
+		return callError("action", &calls[0])
+	}
+	return callError("action", nil)
+}
+
+func midnightTransfers(raw any) []midnightTransfer {
+	return converted[[]midnightTransfer](raw)
+}
+
+func (c midnightContext) collateral(transfers []midnightTransfer, requested []MidnightCollateralTransfer, market midnightMarket, withdrawal string, invalidList bool) ([]midnightPull, error) {
+	if invalidList || len(transfers) != len(requested) {
+		return nil, callError("collateral", &c.call)
+	}
+	seen := make(map[common.Address]bool, len(transfers))
+	pulls := make([]midnightPull, 0, len(transfers))
+	for _, transfer := range transfers {
+		if !transfer.CollateralIndex.IsUint64() || transfer.CollateralIndex.Uint64() >= uint64(len(market.CollateralParams)) {
+			return nil, &CalldataTargetError{detail("collateral", &c.call, nil)}
+		}
+		token := market.CollateralParams[transfer.CollateralIndex.Uint64()].Token
+		var requestedAmount *Amount
+		for _, item := range requested {
+			if sameAddress(item.Collateral.Address, token.Hex()) {
+				requestedAmount = &item.Amount
+				break
 			}
-		case "borrow", "lend", "repay", "withdraw-collateral":
-		default:
-			return false
 		}
-	default:
-		return false
-	}
-	return midnightBundle(r, chain, body, final, prereqs)
-}
-
-func midnightDirect(r route, chain midnightDeployment, body request, final Call, prereqs []Call) bool {
-	if final.Value != "0" || !callTo(final, chain.Midnight) {
-		return false
-	}
-	method := "midnight.supplyCollateral"
-	if r.action == "withdraw" {
-		method = "midnight.withdraw"
-		if len(prereqs) != 0 || body.Fee.BPS != 0 || body.Fee.Recipient != "" {
-			return false
-		}
-	} else if final.Kind != "supply_collateral" {
-		return false
-	}
-	m := midnightMethods[method]
-	a, ok := decode(m, final, body.Origin, true)
-	account := common.HexToAddress(body.Account)
-	if !ok || !midnightMarket(m, a["market"], chain, r.selector) || address(a["onBehalf"]) != account {
-		return false
-	}
-	if r.action == "withdraw" {
-		if address(a["receiver"]) != account || !positive(a["units"]) {
-			return false
-		}
-		if body.Amount.Unit == "all" {
-			return body.Amount.Value == ""
-		}
-		n, valid := decimal(body.Amount.Value)
-		return valid && (body.Amount.Unit == "assets" || body.Amount.Unit == "units") && eq(a["units"], n)
-	}
-	token := midnightCollateral(a["market"], a["collateralIndex"])
-	if token == zeroAddress || !nonzeroAddress(body.CollateralToken.Address) ||
-		token != common.HexToAddress(body.CollateralToken.Address) || !amounts(body.Amount, a, "assets", "", false) {
-		return false
-	}
-	return midnightPrereqs(chain, body, prereqs, chain.Midnight, map[common.Address]*big.Int{token: number(a["assets"])})
-}
-
-func midnightBundle(r route, chain midnightDeployment, body request, final Call, prereqs []Call) bool {
-	var buy, reduce, direct, collateralOnly bool
-	kind, marketID := "", r.selector
-	if r.family == "midnight/offer-groups" {
-		marketID = body.MidnightID
-	}
-	switch r.action {
-	case "lend":
-		buy, kind = true, "lend"
-	case "borrow":
-		kind = "borrow"
-		if len(body.Supplies) > 0 {
-			kind = "supply_collateral_and_borrow"
-		}
-	case "take":
-		buy, kind = final.Kind == "lend", "borrow"
-		if buy {
-			kind = "lend"
-		} else if len(body.Supplies) > 0 {
-			kind = "supply_collateral_and_borrow"
-		}
-	case "repay":
-		buy, reduce = true, true
-		switch body.Type {
-		case "direct":
-			direct, kind = true, "repay_and_withdraw_collateral"
-		case "market":
-			kind = "market_repay_and_withdraw_collateral"
-		default:
-			return false
-		}
-	case "withdraw-collateral":
-		buy, reduce, direct, collateralOnly, kind = true, true, true, true, "repay_and_withdraw_collateral"
-		if len(body.Withdrawals) == 0 {
-			return false
-		}
-	case "withdraw":
-		reduce, kind = true, "withdraw"
-	default:
-		return false
-	}
-	if kind != final.Kind || !callTo(final, chain.MidnightBundlesV2) {
-		return false
-	}
-	units := body.Amount.Unit == "units" || body.Amount.Unit == "all"
-	method := sellAssets
-	if buy && units {
-		method = buyUnits
-	} else if buy {
-		method = buyAssets
-	} else if units {
-		method = sellUnits
-	}
-	m := midnightMethods[method]
-	a, ok := decode(m, final, body.Origin, true)
-	if !ok || !midnightMarket(m, a["market"], chain, marketID) || a["reduceOnly"] != reduce ||
-		(buy && a["repayEnabled"] != direct) || !midnightLimits(body, a, direct) ||
-		!midnightGuard(body, a) {
-		return false
-	}
-	target := "targetSellerAssets"
-	recv := "receiver"
-	if buy {
-		target, recv = "targetBuyerAssets", "collateralReceiver"
-	}
-	if units {
-		target = "targetUnits"
-	}
-	if !midnightTarget(body.Amount, a[target], direct, collateralOnly) ||
-		(address(a[recv]) != common.HexToAddress(body.Account) &&
-			(!buy || len(body.Withdrawals) != 0 || address(a[recv]) != zeroAddress)) {
-		return false
-	}
-	if direct && !units && !eq(a["minUnits"], number(a[target])) {
-		return false
-	}
-	market := a["market"]
-	fills := reflect.ValueOf(a["offerFills"])
-	if (fills.Len() == 0) != direct {
-		return false
-	}
-	group, maker := "", ""
-	if r.action == "take" {
-		group, maker = r.selector, body.Maker
-	}
-	actualID := midnightMarketID(m, market).Hex()
-	for i := 0; i < fills.Len(); i++ {
-		offer := field(fills.Index(i).Interface(), "Offer")
-		if !midnightMarket(m, field(offer, "Market"), chain, actualID) ||
-			field(offer, "Buy") != !buy ||
-			(group != "" && !matchesWord(field(offer, "Group"), group)) ||
-			(maker != "" && (!nonzeroAddress(maker) || address(field(offer, "Maker")) != common.HexToAddress(maker))) {
-			return false
-		}
-	}
-	supplies, ok := midnightChanges(market, a["collateralSupplies"], body.Supplies, false)
-	if !ok {
-		return false
-	}
-	if _, ok := midnightChanges(market, a["collateralWithdrawals"], body.Withdrawals, true); !ok {
-		return false
-	}
-	if buy && !collateralOnly {
-		cap := number(a["targetBuyerAssets"])
-		if units {
-			cap = number(a["maxBuyerAssets"])
-		}
-		if cap == nil || cap.Sign() <= 0 {
-			return false
-		}
-		supplies[address(field(market, "LoanToken"))] = cap
-	}
-	return midnightFunding(chain, body, final, a, supplies) &&
-		midnightPrereqs(chain, body, prereqs, chain.MidnightBundlesV2, supplies)
-}
-
-func midnightLimits(body request, a map[string]any, direct bool) bool {
-	if body.Expires != 0 && !direct {
-		deadline := number(a["deadline"])
-		if deadline == nil || deadline.Cmp(new(big.Int).SetUint64(body.Expires)) > 0 {
-			return false
-		}
-		body.Expires = 0
-	}
-	return limits(body, a)
-}
-
-func midnightGuard(body request, a map[string]any) bool {
-	var arg string
-	switch body.Guard.Type {
-	case "max_assets":
-		arg = "maxBuyerAssets"
-	case "max_units":
-		arg = "maxUnits"
-	case "min_assets":
-		arg = "minSellerAssets"
-	case "min_units":
-		arg = "minUnits"
-	case "", "slippage", "min_rate", "max_rate":
-		return true
-	default:
-		return false
-	}
-	actual := number(a[arg])
-	want, ok := decimal(body.Guard.Value)
-	if !ok || actual == nil {
-		return false
-	}
-	if strings.HasPrefix(arg, "max") {
-		return actual.Cmp(want) <= 0
-	}
-	return actual.Cmp(want) >= 0
-}
-
-func midnightTarget(amount amount, actual any, direct, collateralOnly bool) bool {
-	if collateralOnly {
-		return amount.Unit == "" && uintEq(actual, 0)
-	}
-	if direct && amount.Unit == "all" {
-		return amount.Value == "" && eq(actual, maxUint256)
-	}
-	n, ok := decimal(amount.Value)
-	return ok && n.Sign() > 0 && (amount.Unit == "assets" || amount.Unit == "units" && !direct) && eq(actual, n)
-}
-
-func midnightCollateral(market any, index any) common.Address {
-	n := number(index)
-	collateral := reflect.ValueOf(field(market, "CollateralParams"))
-	if n == nil || !n.IsUint64() || n.Uint64() >= uint64(collateral.Len()) {
-		return zeroAddress
-	}
-	return address(field(collateral.Index(int(n.Uint64())).Interface(), "Token"))
-}
-
-func midnightChanges(market, entries any, requested []collateralChange, withdraw bool) (map[common.Address]*big.Int, bool) {
-	caps := make(map[common.Address]*big.Int, len(requested))
-	if entries == nil {
-		return caps, len(requested) == 0
-	}
-	rows := reflect.ValueOf(entries)
-	if rows.Len() != len(requested) {
-		return nil, false
-	}
-	for _, item := range requested {
-		token := common.HexToAddress(item.Collateral.Address)
-		if !nonzeroAddress(item.Collateral.Address) || caps[token] != nil {
-			return nil, false
-		}
-		n, ok := decimal(item.Amount.Value)
-		if item.Amount.Unit == "all" && item.Amount.Value == "" && withdraw {
-			n = maxUint256
-		} else if item.Amount.Unit != "assets" || !ok || n.Sign() <= 0 {
-			return nil, false
-		}
-		caps[token] = n
-	}
-	seen := make(map[common.Address]bool, len(caps))
-	for i := 0; i < rows.Len(); i++ {
-		row := rows.Index(i).Interface()
-		token := midnightCollateral(market, field(row, "CollateralIndex"))
-		if seen[token] || !eq(field(row, "Assets"), caps[token]) {
-			return nil, false
+		if requestedAmount == nil || seen[token] {
+			return nil, &CalldataTargetError{detail("collateral", &c.call, nil)}
 		}
 		seen[token] = true
+		all := requestedAmount.Unit == "all" && withdrawal != ""
+		if requestedAmount.Unit != "assets" && !all {
+			return nil, amountError("collateral.amount.unit", c.call)
+		}
+		if transfer.Assets.Sign() == 0 || (withdrawal == "bundle" && transfer.Assets.Cmp(maxUint256) == 0 && !all) {
+			return nil, amountError("collateral.amount", c.call)
+		}
+		if !all {
+			if err := checkNamedAssets(transfer.Assets, *requestedAmount, "collateral.amount", c.call); err != nil {
+				return nil, err
+			}
+		}
+		pulls = append(pulls, midnightPull{token, transfer.Assets})
 	}
-	return caps, true
+	return pulls, nil
 }
 
-func midnightFunding(chain midnightDeployment, body request, call Call, a map[string]any, caps map[common.Address]*big.Int) bool {
-	actual, ok := decimal(call.Value)
-	if !ok {
-		return false
-	}
-	token := chain.WrappedNative
-	cap := caps[token]
-	if actual.Sign() == 0 {
-		if address(a["wrappedNative"]) != zeroAddress {
-			return false
-		}
-		switch body.Funding.Type {
-		case "", "erc20":
-			return body.Funding.MaxNative == ""
-		case "auto":
-			_, ok := decimal(body.Funding.MaxNative)
-			return ok && token != zeroAddress && cap != nil
-		default:
-			return false
-		}
-	}
-	nativeCap, ok := decimal(body.Funding.MaxNative)
-	if !ok || nativeCap.Cmp(actual) < 0 || token == zeroAddress || address(a["wrappedNative"]) != token ||
-		cap == nil || cap.Cmp(actual) < 0 {
-		return false
-	}
-	if body.Funding.Type != "auto" && (body.Funding.Type != "native" || cap.Cmp(actual) != 0) {
-		return false
-	}
-	return true
-}
-
-func midnightPrereqs(chain midnightDeployment, body request, calls []Call, spender common.Address, caps map[common.Address]*big.Int) bool {
-	seen := make(map[common.Address]bool, len(caps))
+func (c midnightContext) prerequisites(calls []CalldataCall, pulls []midnightPull, allowAuthorization bool) ([]DecodedCalldataCall, error) {
 	var authorized bool
+	approved := make(map[common.Address]*big.Int, len(pulls))
+	result := make([]DecodedCalldataCall, 0, len(calls)+1)
 	for i, call := range calls {
-		if call.Value != "0" || authorized {
-			return false
-		}
-		switch call.Kind {
-		case "authorization", "authorize":
-			a, ok := decode(midnightMethods["midnight.setIsAuthorized"], call, "", false)
-			if !ok || spender != chain.MidnightBundlesV2 || !callTo(call, chain.Midnight) || address(a["authorized"]) != spender ||
-				address(a["onBehalf"]) != common.HexToAddress(body.Account) || a["newIsAuthorized"] != true {
-				return false
+		if sameAddress(call.To, c.chain.Midnight) {
+			if err := expectZeroValue(call); err != nil {
+				return nil, err
+			}
+			decoded, err := decodeCall(call, defaultSnapshot.abis["midnight"], false)
+			if err != nil {
+				return nil, err
+			}
+			if !allowAuthorization || authorized || decoded.FunctionName != "setIsAuthorized" || !decoded.Args[1].(bool) {
+				return nil, callError("authorization", &call)
+			}
+			if !sameAddress(decoded.Args[0].(common.Address).Hex(), c.chain.MidnightBundlesV2) {
+				return nil, &CalldataTargetError{detail("authorization.spender", &call, nil)}
+			}
+			if err := recipient(decoded.Args[2].(common.Address), c.intent.Account, "on_behalf", call); err != nil {
+				return nil, err
 			}
 			authorized = true
-		case "approval", "erc20_approval":
-			token := common.HexToAddress(call.To)
-			cap := caps[token]
-			a, ok := decode(methods["approve"], call, "", false)
-			n := number(a["amount"])
-			if !ok || seen[token] || cap == nil || cap.Sign() <= 0 || n == nil || address(a["spender"]) != spender {
-				return false
-			}
-			if n.Sign() == 0 {
-				if i+1 >= len(calls) || !callTo(calls[i+1], token) || (i > 0 && callTo(calls[i-1], token)) {
-					return false
-				}
-			} else {
-				if !eq(n, cap) && (n.Cmp(cap) < 0 || n.Cmp(maxUint256) != 0 && n.Cmp(maxUint96) != 0) {
-					return false
-				}
-				seen[token] = true
-			}
-		default:
-			return false
+			result = append(result, decoded)
+			continue
 		}
+		var pull *midnightPull
+		for j := range pulls {
+			if sameAddress(call.To, pulls[j].token.Hex()) {
+				pull = &pulls[j]
+				break
+			}
+		}
+		if pull == nil {
+			return nil, &CalldataTargetError{detail("approval.token", &call, nil)}
+		}
+		token := pull.token.Hex()
+		reset := i+1 < len(calls) && sameAddress(calls[i+1].To, token)
+		decoded, err := checkApproval(call, c.call.To, token, pull.assets, reset)
+		if err != nil {
+			return nil, err
+		}
+		amount := decoded.Args[1].(*big.Int)
+		if previous := approved[pull.token]; previous != nil && (previous.Sign() != 0 || amount.Sign() == 0) {
+			return nil, callError("approval", &call)
+		}
+		approved[pull.token] = amount
+		result = append(result, decoded)
 	}
-	return true
+	return result, nil
 }
 
-func matchesWord(value any, hexWord string) bool {
-	word, ok := value.([32]byte)
-	return ok && strings.EqualFold(common.Hash(word).Hex(), hexWord)
+func (c midnightContext) core(prefix []CalldataCall) ([]DecodedCalldataCall, error) {
+	if err := expectZeroValue(c.call); err != nil {
+		return nil, err
+	}
+	decoded, err := decodeCall(c.call, defaultSnapshot.abis["midnight"], false)
+	if err != nil {
+		return nil, err
+	}
+	args := decoded.Args
+	if c.intent.Action == "midnight.supply_collateral" && decoded.FunctionName == "supplyCollateral" {
+		market, err := c.market(args[0])
+		if err != nil {
+			return nil, err
+		}
+		if err := recipient(args[3].(common.Address), c.intent.Account, "on_behalf", c.call); err != nil {
+			return nil, err
+		}
+		pulls, err := c.collateral([]midnightTransfer{{args[1].(*big.Int), args[2].(*big.Int)}}, []MidnightCollateralTransfer{{c.intent.Collateral, c.intent.Amount}}, market, "", false)
+		if err != nil {
+			return nil, err
+		}
+		result, err := c.prerequisites(prefix, pulls, false)
+		if err != nil {
+			return nil, err
+		}
+		return append(result, decoded), nil
+	}
+	if len(prefix) != 0 {
+		return nil, callError("calls", &c.call)
+	}
+	if c.intent.Action == "midnight.withdraw_collateral" {
+		checked, err := c.coreWithdrawals(decoded)
+		if err != nil {
+			return nil, err
+		}
+		return []DecodedCalldataCall{checked}, nil
+	}
+	if (c.intent.Action != "midnight.withdraw" && c.intent.Action != "midnight.redeem") || decoded.FunctionName != "withdraw" {
+		return nil, callError("function", &c.call)
+	}
+	if _, err := c.market(args[0]); err != nil {
+		return nil, err
+	}
+	if err := c.ownerAndReceiver(args[2].(common.Address), args[3].(common.Address)); err != nil {
+		return nil, err
+	}
+	amount, units := c.intent.Amount, args[1].(*big.Int)
+	if amount.Unit != "all" && amount.Unit != "units" && amount.Unit != "assets" {
+		return nil, amountError("amount.unit", c.call)
+	}
+	if units.Sign() == 0 {
+		return nil, amountError("amount", c.call)
+	}
+	if amount.Unit != "all" {
+		if err := expectMidnightAmount(units, amount.Value, "amount", c.call); err != nil {
+			return nil, err
+		}
+	}
+	if err := c.amountGuard("units", units, units); err != nil {
+		return nil, err
+	}
+	return []DecodedCalldataCall{decoded}, nil
+}
+
+func (c midnightContext) ownerAndReceiver(owner, receiver common.Address) error {
+	if err := recipient(owner, c.intent.Account, "on_behalf", c.call); err != nil {
+		return err
+	}
+	return recipient(receiver, c.intent.Account, "receiver", c.call)
+}
+
+func (c midnightContext) coreWithdrawals(decoded DecodedCalldataCall) (DecodedCalldataCall, error) {
+	entries := []DecodedCalldataCall{decoded}
+	if decoded.FunctionName == "multicall" {
+		data := decoded.Args[0].([][]byte)
+		entries = make([]DecodedCalldataCall, len(data))
+		for i, item := range data {
+			child := innerCalldata(c.call, item, i)
+			var err error
+			if entries[i], err = decodeCall(child, defaultSnapshot.abis["midnight"], true); err != nil {
+				return DecodedCalldataCall{}, err
+			}
+		}
+	}
+	if len(entries) == 0 {
+		return DecodedCalldataCall{}, callError("collateral", &c.call)
+	}
+	var market midnightMarket
+	transfers := make([]midnightTransfer, len(entries))
+	for i, entry := range entries {
+		args, child := entry.Args, entry.Call
+		if entry.FunctionName != "withdrawCollateral" {
+			return DecodedCalldataCall{}, callError("function", &child)
+		}
+		childContext := c
+		childContext.call = child
+		params, err := childContext.market(args[0])
+		if err != nil {
+			return DecodedCalldataCall{}, err
+		}
+		if err := childContext.ownerAndReceiver(args[3].(common.Address), args[4].(common.Address)); err != nil {
+			return DecodedCalldataCall{}, err
+		}
+		if i == 0 {
+			market = params
+		}
+		transfers[i] = midnightTransfer{args[1].(*big.Int), args[2].(*big.Int)}
+	}
+	if _, err := c.collateral(transfers, c.intent.CollateralWithdrawals, market, "core", c.intent.nullWithdrawals || c.intent.CollateralWithdrawals == nil); err != nil {
+		return DecodedCalldataCall{}, err
+	}
+	if decoded.FunctionName == "multicall" {
+		decoded.Calls = entries
+	}
+	return decoded, nil
+}
+
+func expectMidnightAmount(value *big.Int, expected, field string, call CalldataCall) error {
+	want, err := readUint(expected, field, call)
+	if err != nil {
+		return err
+	}
+	if value.Cmp(want) != 0 {
+		return amountError(field, call)
+	}
+	return nil
+}
+
+func (c midnightContext) targetAmount(unit string, target *big.Int, allowZero bool) error {
+	amount := c.intent.Amount
+	if amount.Unit == "all" {
+		if unit == "units" && target.Cmp(maxUint256) == 0 {
+			return nil
+		}
+		return amountError("amount", c.call)
+	}
+	if amount.Unit != unit || target.Cmp(maxUint256) == 0 || (target.Sign() == 0 && !allowZero) {
+		return amountError("amount", c.call)
+	}
+	return expectMidnightAmount(target, amount.Value, "amount", c.call)
+}
+
+func (c midnightContext) checkGuardType() error {
+	if c.intent.nullGuard {
+		return &CalldataUnsupportedError{detail("guard.type", &c.call, nil)}
+	}
+	guard := c.intent.Guard
+	if guard == nil || guard.Type == "slippage" {
+		return nil
+	}
+	switch c.intent.Action {
+	case "midnight.lend", "midnight.market_repay", "midnight.take_lend":
+		if guard.Type == "min_units" || guard.Type == "max_assets" {
+			return nil
+		}
+	case "midnight.borrow", "midnight.withdraw", "midnight.redeem", "midnight.take_borrow", "midnight.supply_collateral_take_borrow":
+		if guard.Type == "max_units" || guard.Type == "min_assets" {
+			return nil
+		}
+	}
+	return &CalldataUnsupportedError{detail("guard.type", &c.call, nil)}
+}
+
+func (c midnightContext) amountGuard(unit string, target, bound *big.Int) error {
+	if c.intent.Guard == nil {
+		return nil
+	}
+	guard := *c.intent.Guard
+	if guard.Type == "slippage" {
+		return nil
+	}
+	if strings.HasSuffix(guard.Type, unit) {
+		bound = target
+	}
+	want, err := readUint(guard.Value, "guard.value", c.call)
+	if err != nil {
+		return err
+	}
+	cmp := bound.Cmp(want)
+	if (strings.HasPrefix(guard.Type, "min_") && cmp < 0) || (strings.HasPrefix(guard.Type, "max_") && cmp > 0) {
+		return amountError("guard.value", c.call)
+	}
+	return nil
+}
+
+func (c midnightContext) buy(args []any, unit string) ([]midnightPull, error) {
+	direct := c.intent.Action == "midnight.repay"
+	lend := c.intent.Action == "midnight.lend" || c.intent.Action == "midnight.take_lend"
+	repay := c.intent.Action == "midnight.market_repay"
+	if !direct && !lend && !repay {
+		return nil, callError("function", &c.call)
+	}
+	market, err := c.market(args[0])
+	if err != nil {
+		return nil, err
+	}
+	target, bound := args[1].(*big.Int), args[2].(*big.Int)
+	reduceOnly, repayEnabled := args[3].(bool), args[4].(bool)
+	fills := reflect.ValueOf(args[5])
+	withdrawals := midnightTransfers(args[6])
+	if reduceOnly == lend || repayEnabled != direct || (fills.Len() == 0) != direct {
+		return nil, callError("repay", &c.call)
+	}
+	amount := c.intent.Amount
+	if direct && amount.Unit != "all" && amount.Unit != "assets" || !direct && amount.Unit != "assets" && amount.Unit != "units" {
+		return nil, amountError("amount.unit", c.call)
+	}
+	if err := c.targetAmount(unit, target, direct && len(withdrawals) > 0); err != nil {
+		return nil, err
+	}
+	if direct && unit == "assets" && bound.Cmp(target) != 0 {
+		return nil, amountError("min_units", c.call)
+	}
+	if direct && amount.Unit == "all" && (bound.Sign() == 0 || bound.Cmp(maxUint256) == 0) {
+		return nil, amountError("max_assets", c.call)
+	}
+	if err := c.amountGuard(unit, target, bound); err != nil {
+		return nil, err
+	}
+	var requested []MidnightCollateralTransfer
+	var invalidList bool
+	if direct || repay {
+		requested, invalidList = c.intent.CollateralWithdrawals, c.intent.nullWithdrawals
+	}
+	if _, err := c.collateral(withdrawals, requested, market, "bundle", invalidList); err != nil {
+		return nil, err
+	}
+	receiver := args[7].(common.Address)
+	if len(withdrawals) != 0 || receiver != (common.Address{}) {
+		if err := recipient(receiver, c.intent.Account, "collateral_receiver", c.call); err != nil {
+			return nil, err
+		}
+	}
+	if err := c.fills(fills, false); err != nil {
+		return nil, err
+	}
+	if err := c.fee(args[8].(*big.Int), args[9].(common.Address), direct || repay); err != nil {
+		return nil, err
+	}
+	maxAssets := target
+	if unit == "units" {
+		maxAssets = bound
+	}
+	wrapped := args[12].(common.Address)
+	cap := new(big.Int)
+	if wrapped == market.LoanToken {
+		cap = maxAssets
+	}
+	if err := c.native(wrapped, cap); err != nil {
+		return nil, err
+	}
+	if maxAssets.Sign() == 0 {
+		return nil, nil
+	}
+	return []midnightPull{{market.LoanToken, maxAssets}}, nil
+}
+
+func (c midnightContext) sell(args []any, unit string) ([]midnightPull, error) {
+	borrow := c.intent.Action == "midnight.borrow" || c.intent.Action == "midnight.take_borrow" || c.intent.Action == "midnight.supply_collateral_take_borrow"
+	withdraw := c.intent.Action == "midnight.withdraw"
+	if !borrow && !withdraw {
+		return nil, callError("function", &c.call)
+	}
+	market, err := c.market(args[0])
+	if err != nil {
+		return nil, err
+	}
+	target, bound := args[1].(*big.Int), args[2].(*big.Int)
+	fills := reflect.ValueOf(args[6])
+	if args[3].(bool) != withdraw || fills.Len() == 0 || c.intent.Amount.Unit == "all" {
+		return nil, callError("offers", &c.call)
+	}
+	if err := c.targetAmount(unit, target, false); err != nil {
+		return nil, err
+	}
+	if err := c.amountGuard(unit, target, bound); err != nil {
+		return nil, err
+	}
+	if err := recipient(args[4].(common.Address), c.intent.Account, "receiver", c.call); err != nil {
+		return nil, err
+	}
+	if err := c.fills(fills, true); err != nil {
+		return nil, err
+	}
+	if err := c.fee(args[7].(*big.Int), args[8].(common.Address), false); err != nil {
+		return nil, err
+	}
+	var requested []MidnightCollateralTransfer
+	var invalidList bool
+	if c.intent.Action == "midnight.borrow" || c.intent.Action == "midnight.supply_collateral_take_borrow" {
+		requested, invalidList = c.intent.CollateralSupplies, c.intent.nullSupplies
+	}
+	pulls, err := c.collateral(midnightTransfers(args[5]), requested, market, "", invalidList)
+	if err != nil {
+		return nil, err
+	}
+	wrapped := args[10].(common.Address)
+	cap := new(big.Int)
+	for _, pull := range pulls {
+		if pull.token == wrapped {
+			cap = pull.assets
+			break
+		}
+	}
+	return pulls, c.native(wrapped, cap)
+}
+
+func (c midnightContext) fills(entries reflect.Value, buy bool) error {
+	var firstMaker common.Address
+	for i := 0; i < entries.Len(); i++ {
+		entry := entries.Index(i)
+		offer := entry.FieldByName("Offer")
+		if _, err := c.market(offer.FieldByName("Market").Interface()); err != nil {
+			return err
+		}
+		maker := offer.FieldByName("Maker").Interface().(common.Address)
+		if offer.FieldByName("Buy").Bool() != buy || entry.FieldByName("Units").Interface().(*big.Int).Sign() == 0 || sameAddress(maker.Hex(), c.intent.Account) {
+			return callError("offer_fills", &c.call)
+		}
+		if c.take != nil {
+			group := common.Hash(offer.FieldByName("Group").Interface().([32]byte))
+			if !strings.EqualFold(group.Hex(), c.take.Group) {
+				return &CalldataTargetError{detail("group", &c.call, nil)}
+			}
+			if offer.FieldByName("ReduceOnly").Bool() {
+				return &CalldataUnsupportedError{detail("offer.reduce_only", &c.call, nil)}
+			}
+			if i == 0 {
+				firstMaker = maker
+			}
+			if c.take.Maker == nil && maker != firstMaker || c.take.Maker != nil && !sameAddress(maker.Hex(), *c.take.Maker) {
+				return callError("offer_fills", &c.call)
+			}
+		}
+	}
+	return nil
+}
+
+func (c midnightContext) native(wrapped common.Address, cap *big.Int) error {
+	value, err := readUint(c.call.Value, "value", c.call)
+	if err != nil {
+		return err
+	}
+	if value.Sign() == 0 && wrapped == (common.Address{}) {
+		return nil
+	}
+	if value.Sign() == 0 || !sameAddress(wrapped.Hex(), c.chain.WNative) || value.Cmp(cap) > 0 {
+		return amountError("value", c.call)
+	}
+	return checkNativeBudget(value, c.intent.Funding, c.call)
+}
+
+func (c midnightContext) fee(pct *big.Int, to common.Address, repayment bool) error {
+	if pct.Cmp(wad) >= 0 {
+		return &CalldataFeeError{detail("referral_fee", &c.call, nil)}
+	}
+	referral := c.intent.ReferralFee
+	if repayment {
+		referral = nil
+	}
+	return checkFee(pct, to, c.intent.MaxFeeBPS, referral, c.call)
 }

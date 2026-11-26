@@ -1,221 +1,193 @@
-package verifier
+package calldataverifier
 
 import (
-	"encoding/hex"
+	"bytes"
 	"encoding/json"
 	"math/big"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 )
 
-func TestMidnightRoutes(t *testing.T) {
-	for _, f := range loadFixtures(t, "midnight.json") {
-		t.Run(f.Calls[len(f.Calls)-1].Kind, func(t *testing.T) {
-			if !Verify(f.Intent, f.Calls) {
-				t.Fatalf("valid response rejected: %s", f.Intent.Path)
+func TestParityMidnight(t *testing.T) {
+	runParity(t, "midnight", parityIntent[MidnightMarketIntent], nil)
+}
+
+// midnight.test.ts: verify prepared market cases against their original intent.
+func TestMidnightMarketVectors(t *testing.T) {
+	for name, vector := range loadVectors[MidnightMarketIntent](t, "midnight-vectors.json") {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := VerifyCalldata(vector.Intent, vector.Calls)
+			if err != nil {
+				t.Fatal(err)
 			}
-			for name, mutate := range map[string]func(*Intent, *Call){
-				"target":        func(_ *Intent, c *Call) { c.To = "0x" + strings.Repeat("ee", 20) },
-				"selector":      func(_ *Intent, c *Call) { c.Data = "0xffffffff" + c.Data[10:] },
-				"kind":          func(_ *Intent, c *Call) { c.Kind = "unknown" },
-				"native-value":  func(_ *Intent, c *Call) { c.Value = "1" },
-				"unknown-route": func(intent *Intent, _ *Call) { intent.Path += "-unknown" },
-			} {
-				t.Run(name, func(t *testing.T) {
-					intent := f.Intent
-					calls := slices.Clone(f.Calls)
-					mutate(&intent, &calls[len(calls)-1])
-					if Verify(intent, calls) {
-						t.Fatal("mutated response accepted")
-					}
-				})
+			if len(got) != len(vector.Calls) {
+				t.Fatalf("decoded %d calls, want %d", len(got), len(vector.Calls))
 			}
+			for i := range got {
+				if got[i].Call != vector.Calls[i] || got[i].FunctionName == "" {
+					t.Fatalf("unexpected decoded call: %+v", got[i])
+				}
+			}
+			intent := vector.Intent
+			intent.Market = (common.Hash{}).Hex()
+			_, err = VerifyCalldata(intent, vector.Calls)
+			last := got[len(got)-1]
+			id := last.Call.ID
+			if len(last.Calls) > 0 {
+				id = last.Calls[0].Call.ID
+			}
+			requireError[*CalldataTargetError](t, err, "market", &id)
 		})
 	}
 }
 
-func TestMidnightWalletOfferApproval(t *testing.T) {
-	chain := midnightChains[1]
-	for _, f := range loadFixtures(t, "midnight.json") {
-		if !strings.HasSuffix(f.Intent.Path, "/offers/repay") {
-			continue
-		}
-		token := "0x" + strings.Repeat("12", 20)
-		walletLend := Intent{
-			Path: "/v0/actions/midnight/offers/lend",
-			Body: json.RawMessage(`{
-				"account": "0xabababababababababababababababababababab",
-				"chain_id": 1,
-				"amount": {"unit": "assets", "value": "5"},
-				"funding_source": {"type": "wallet"},
-				"offers": {"type": "price", "entries": [{
-					"market_id": "0x491551ab0ed8472b2267b6eda7e1b953d2a1d6a98cfc85df1feadc62f01e450d",
-					"tick": "100",
-					"starts_at": 1800000000,
-					"expires_at": 1900000000
-				}]},
-				"market_params": [{
-					"loan_token": "0x1212121212121212121212121212121212121212",
-					"maturity": 2000000000,
-					"rcf_threshold": "0",
-					"enter_gate": "0x0000000000000000000000000000000000000000",
-					"liquidator_gate": "0x0000000000000000000000000000000000000000",
-					"collaterals": [{
-						"token": "0x3434343434343434343434343434343434343434",
-						"lltv": "800000000000000000",
-						"liquidation_cursor": "0",
-						"oracle": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
-					}]
-				}]
-			}`),
-		}
-		for _, c := range []struct {
-			name, token string
-			spender     common.Address
-			amount      *big.Int
-			intent      Intent
-			valid       bool
-		}{
-			{"bounded", token, chain.Midnight, big.NewInt(5), f.Intent, true},
-			{"over intent", token, chain.Midnight, big.NewInt(6), f.Intent, false},
-			{"unlimited", token, chain.Midnight, maxUint256, f.Intent, true},
-			{"wallet lend unlimited bound token", token, chain.Midnight, maxUint256, walletLend, true},
-			{"wallet lend unlimited wrong loan token", "0x" + strings.Repeat("13", 20), chain.Midnight, maxUint256, walletLend, false},
-			{"unlimited wrong spender", token, chain.MidnightBundlesV2, maxUint256, f.Intent, false},
-			{"unlimited pinned token", chain.Midnight.Hex(), chain.Midnight, maxUint256, f.Intent, false},
-			{"pinned", chain.Midnight.Hex(), chain.Midnight, big.NewInt(5), f.Intent, false},
-		} {
-			t.Run(c.name, func(t *testing.T) {
-				method := methods["approve"]
-				args, err := method.Inputs.Pack(c.spender, c.amount)
-				if err != nil {
-					t.Fatal(err)
-				}
-				calldata := "0x" + hex.EncodeToString(slices.Concat(method.ID, args))
-				leading := Call{ID: "call_21", Kind: "approval", To: c.token, Data: calldata, Value: "0"}
-				if result := Verify(c.intent, append([]Call{leading}, f.Calls...)); result != c.valid {
-					t.Errorf("Verify = %t; want %t", result, c.valid)
-				}
-			})
-		}
-		return
-	}
-	t.Fatal("wallet repay fixture missing")
-}
+// midnight.test.ts: lender pull caps, unsupported rate guards, and null collateral lists.
+func TestMidnightGuardAndCollateralLists(t *testing.T) {
+	vectors := loadVectors[MidnightMarketIntent](t, "midnight-vectors.json")
+	lend := vectors["lend_exactAssets"]
+	intent := lend.Intent
+	intent.Guard = &MidnightGuard{Type: "max_assets", Value: "0"}
+	last := lend.Calls[len(lend.Calls)-1]
+	_, err := VerifyCalldata(intent, lend.Calls)
+	requireError[*CalldataAmountError](t, err, "guard.value", &last.ID)
+	intent.Guard = &MidnightGuard{Type: "min_rate", Value: "0"}
+	_, err = VerifyCalldata(intent, lend.Calls)
+	requireError[*CalldataUnsupportedError](t, err, "guard.type", &last.ID)
 
-func TestMidnightNativeFundingApproval(t *testing.T) {
-	chain := midnightChains[1]
-	var body request
-	for _, mode := range []struct {
-		name, value string
-	}{
-		{"auto", "2"},
-		{"native", "5"},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			body.Funding.Type = mode.name
-			body.Funding.MaxNative = "5"
-			caps := map[common.Address]*big.Int{chain.WrappedNative: big.NewInt(5)}
-			wrapped := map[string]any{"wrappedNative": chain.WrappedNative}
-			if !midnightFunding(chain, body, Call{Value: mode.value}, wrapped, caps) {
-				t.Fatal("valid native funding rejected")
-			}
-			for _, amount := range []*big.Int{big.NewInt(5), maxUint256} {
-				m := methods["approve"]
-				data, err := m.Inputs.Pack(chain.MidnightBundlesV2, amount)
-				if err != nil {
-					t.Fatal(err)
-				}
-				call := Call{Kind: "approval", To: chain.WrappedNative.Hex(), Data: "0x" + hex.EncodeToString(slices.Concat(m.ID, data)), Value: "0"}
-				if !midnightPrereqs(chain, body, []Call{call}, chain.MidnightBundlesV2, caps) {
-					t.Fatalf("approval %s rejected for full wrapped-native pull", amount)
-				}
-			}
-		})
-	}
-}
-
-func TestMidnightCancelRejectsUnknownInnerSelector(t *testing.T) {
-	for _, f := range loadFixtures(t, "midnight.json") {
-		if !strings.HasSuffix(f.Intent.Path, "/offers/cancel") {
-			continue
-		}
-		selector := hex.EncodeToString(midnightMethods["midnight.setConsumed"].ID)
-		f.Calls[0].Data = strings.Replace(f.Calls[0].Data, selector, "ffffffff", 1)
-		if Verify(f.Intent, f.Calls) {
-			t.Fatal("multicall accepted unknown nested selector")
-		}
-		return
-	}
-	t.Fatal("cancellation fixture missing")
-}
-
-func TestWalletLoanTokenBinding(t *testing.T) {
-	raw := json.RawMessage(`[{"loan_token":"0x1111111111111111111111111111111111111111"}]`)
-	if !matchesWalletToken(raw, common.HexToAddress("0x1111111111111111111111111111111111111111")) ||
-		matchesWalletToken(raw, common.HexToAddress("0x2222222222222222222222222222222222222222")) {
-		t.Fatal("wallet loan token binding did not match request")
-	}
-}
-
-func TestMidnightRatifierPins(t *testing.T) {
-	base := midnightChains[8453]
-	for _, c := range []struct {
-		typ, address string
-	}{
-		{"rate", "0x3B2FbA901C88f026BF50A12c8B28484Cd81F9526"},
-		{"rate", "0x39c01afA4B3f827a0bfAa39cDC4610111f80BABc"},
-		{"price", "0x8e38421bC293339798e9bD0c0a51690675D2f94b"},
-	} {
-		t.Run(c.address, func(t *testing.T) {
-			addr := common.HexToAddress(c.address)
-			if !midnightRatifier(base, c.typ, addr) || !base.pinned(addr) {
-				t.Fatal("Base ratifier pin missing")
-			}
-			if midnightChains[1].pinned(addr) {
-				t.Fatal("Base ratifier accepted on Ethereum")
-			}
-			wrongType := "rate"
-			if c.typ == "rate" {
-				wrongType = "price"
-			}
-			if midnightRatifier(base, wrongType, addr) {
-				t.Fatal("ratifier accepted for wrong offer type")
-			}
-		})
-	}
-}
-
-func TestMidnightIntentBindings(t *testing.T) {
-	for _, f := range loadFixtures(t, "midnight.json") {
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(f.Intent.Body, &fields); err != nil {
-			t.Fatal(err)
-		}
-		switch {
-		case strings.Contains(f.Intent.Path, "/markets/"):
-			path := strings.Split(f.Intent.Path, "/")
-			path[5] = "1:0x" + strings.Repeat("ff", 32)
-			f.Intent.Path = strings.Join(path, "/")
-		case strings.HasSuffix(f.Intent.Path, "/take"):
-			fields["maker"] = json.RawMessage(`"0x1111111111111111111111111111111111111111"`)
-		case strings.HasSuffix(f.Intent.Path, "/cancel"):
-			fields["groups"] = json.RawMessage(`["0x` + strings.Repeat("ff", 32) + `","0x` + strings.Repeat("45", 32) + `"]`)
-		case strings.HasSuffix(f.Intent.Path, "/funding/withdraw"):
-			fields["funding_address"] = json.RawMessage(`"0x1111111111111111111111111111111111111111"`)
-		default:
-			continue
-		}
-		body, err := json.Marshal(fields)
+	for name, key := range map[string]string{"repay_partialErc20": "collateral_withdrawals", "borrow_exactAssets": "collateral_supplies"} {
+		vector := vectors[name]
+		data, err := json.Marshal(vector.Intent)
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.Intent.Body = body
-		if Verify(f.Intent, f.Calls) {
-			t.Errorf("mutated intent accepted: %s", f.Intent.Path)
+		data = append(bytes.TrimSuffix(data, []byte("}")), []byte(",\""+key+"\":null}")...)
+		var malformed MidnightMarketIntent
+		if err := json.Unmarshal(data, &malformed); err != nil {
+			t.Fatal(err)
 		}
+		_, err = VerifyCalldata(malformed, vector.Calls)
+		requireError[*CalldataCallError](t, err, "collateral", &vector.Calls[len(vector.Calls)-1].ID)
+	}
+}
+
+// midnight.test.ts: rejects zero all-mode legs and decodes and checks each multicall leg.
+func TestMidnightCoreCollateralWithdrawal(t *testing.T) {
+	vector := loadVectors[MidnightMarketIntent](t, "midnight-vectors.json")["repay_collateralOnlyMultiple"]
+	last := vector.Calls[len(vector.Calls)-1]
+	decoded, err := decodeCall(last, defaultSnapshot.abis["midnight"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := vector.Intent
+	contract := defaultSnapshot.abis["midnight"]
+	call := last
+	data := decoded.Args[0].([][]byte)
+	if len(data) < 2 {
+		t.Fatal("fixture must have multiple withdrawals")
+	}
+	makeMulticall := func(legs [][]byte) CalldataCall {
+		packed, err := contract.Pack("multicall", legs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		call.Data = "0x" + common.Bytes2Hex(packed)
+		return call
+	}
+	verified, err := VerifyCalldata(intent, []CalldataCall{makeMulticall(data)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(verified[0].Calls) != len(data) || verified[0].Calls[0].Call.ID != call.ID+".0" {
+		t.Fatalf("unexpected checked children: %+v", verified[0].Calls)
+	}
+	tampered := slices.Clone(data)
+	zero := changeArgs(t, "midnight", verified[0].Calls[0].Call, func(args []any) { args[2] = new(big.Int) })
+	tampered[0] = common.FromHex(zero.Data)
+	_, err = VerifyCalldata(intent, []CalldataCall{makeMulticall(tampered)})
+	requireError[*CalldataAmountError](t, err, "collateral.amount", &call.ID)
+	tampered[0] = []byte{1}
+	_, err = VerifyCalldata(intent, []CalldataCall{makeMulticall(tampered)})
+	childID := call.ID + ".0"
+	requireError[*CalldataDecodeError](t, err, "data", &childID)
+}
+
+// midnightSdk.test.ts: "rejects reduceOnly=$reduceOnly for $action".
+func TestMidnightSellWithdrawal(t *testing.T) {
+	vector := loadVectors[MidnightMarketIntent](t, "midnight-vectors.json")["borrow_exactUnits"]
+	grant, call := vector.Calls[0], vector.Calls[1]
+	for _, action := range []string{"midnight.borrow", "midnight.withdraw"} {
+		t.Run(action, func(t *testing.T) {
+			intent := vector.Intent
+			intent.Action = action
+			reduceOnly := action == "midnight.withdraw"
+			if reduceOnly {
+				intent.CollateralSupplies = nil
+			}
+			sell := func(reduceOnly bool) CalldataCall {
+				return changeArgs(t, "midnightBundle", call, func(args []any) {
+					args[3] = reduceOnly
+				})
+			}
+			if _, err := VerifyCalldata(intent, []CalldataCall{grant, sell(reduceOnly)}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := VerifyCalldata(intent, []CalldataCall{grant, sell(!reduceOnly)})
+			requireError[*CalldataCallError](t, err, "offers", &call.ID)
+			if action == "midnight.withdraw" {
+				intent.Amount.Unit = "all"
+				_, err = VerifyCalldata(intent, []CalldataCall{grant, sell(reduceOnly)})
+				requireError[*CalldataCallError](t, err, "offers", &call.ID)
+			}
+		})
+	}
+}
+
+// midnight.test.ts: all-mode core redemption rejects zero, not positive unit counts.
+func TestMidnightAllRedemptionUnits(t *testing.T) {
+	vector := loadVectors[MidnightMarketIntent](t, "midnight-vectors.json")["redeem_all"]
+	for _, units := range []int64{0, 1, 200} {
+		call := changeArgs(t, "midnight", vector.Calls[0], func(args []any) {
+			args[1] = big.NewInt(units)
+		})
+		_, err := VerifyCalldata(vector.Intent, []CalldataCall{call})
+		if units == 0 {
+			requireError[*CalldataAmountError](t, err, "amount", &call.ID)
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// midnight.test.ts: "rejects a lend whose pull exceeds the request's maximum assets".
+func TestMidnightUnitsBuyPull(t *testing.T) {
+	vector := loadVectors[MidnightMarketIntent](t, "midnight-vectors.json")["lend_exactUnits"]
+	intent := vector.Intent
+	cap, ok := new(big.Int).SetString(intent.Guard.Value, 10)
+	if !ok {
+		t.Fatal("invalid fixture guard")
+	}
+	bound := cap.Add(cap, big.NewInt(1))
+	last := len(vector.Calls) - 1
+	calls := slices.Clone(vector.Calls)
+	calls[last] = changeArgs(t, "midnightBundle", calls[last], func(args []any) {
+		args[2] = bound
+	})
+	_, err := VerifyCalldata(intent, calls)
+	requireError[*CalldataAmountError](t, err, "guard.value", &calls[last].ID)
+
+	intent.Guard = &MidnightGuard{Type: "min_units", Value: intent.Amount.Value}
+	calls[0] = changeArgs(t, "erc20", calls[0], func(args []any) {
+		args[1] = new(big.Int).Sub(bound, big.NewInt(1))
+	})
+	_, err = VerifyCalldata(intent, calls)
+	requireError[*CalldataAmountError](t, err, "approval.amount", &calls[0].ID)
+	calls[0] = changeArgs(t, "erc20", calls[0], func(args []any) {
+		args[1] = bound
+	})
+	if _, err = VerifyCalldata(intent, calls); err != nil {
+		t.Fatal(err)
 	}
 }

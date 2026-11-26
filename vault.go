@@ -1,124 +1,333 @@
-package verifier
+package calldataverifier
 
 import (
-	"encoding/hex"
+	"fmt"
 	"math/big"
 	"reflect"
+	"strings"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
-func verifyVault(r route, chain deployment, body request, calls []Call) bool {
-	final := calls[len(calls)-1]
-	vault := common.HexToAddress(r.selector)
-	bundle := chain.VaultV1Bundle
-	kindPrefix := "vault_v1_"
-	if r.family == "vaults-v2" {
-		bundle, kindPrefix = chain.VaultV2Bundle, "vault_v2_"
-	}
-	var method, kind string
-	var cap *big.Int
-	token := vault
-	switch r.action {
-	case "deposit":
-		method, kind, token = "vaultBundlesV1Deposit", kindPrefix+"deposit", zeroAddress
-	case "withdraw":
-		method, kind = "vaultBundlesV1Withdraw", kindPrefix+"withdraw"
-		if body.Amount.Unit != "assets" {
-			kind = kindPrefix + "redeem"
+func verifyVault(intent VaultCalldataIntent, calls []CalldataCall, chain Deployment) ([]DecodedCalldataCall, error) {
+	var (
+		contract, method, to string
+		maxCalls             int
+	)
+	switch intent.Action {
+	case "vault_v1.deposit", "vault_v2.deposit":
+		contract, method, to, maxCalls = "vaultBundle", "vaultBundlesV1Deposit", chain.VaultBundlesV1, 3
+	case "vault_v1.withdraw", "vault_v2.withdraw":
+		contract, method, to, maxCalls = "vaultBundle", "vaultBundlesV1Withdraw", chain.VaultBundlesV1, 2
+	case "vault_v2.force_withdraw":
+		if intent.Amount.Unit == "all" {
+			contract, method, to, maxCalls = "vault", "multicall", intent.Vault, 1
+		} else {
+			contract, method, to, maxCalls = "vaultExit", "vaultExitBundlesV1ForceWithdrawVaultV2", chain.VaultExitBundlesV1, 2
 		}
-	case "force-withdraw":
-		if r.family != "vaults-v2" || chain.VaultExit == zeroAddress {
-			return false
-		}
-		if body.Amount.Unit == "all" {
-			return len(calls) == 1 && verifyVaultMulticall(final, vault, body)
-		}
-		method, kind, bundle = "vaultExitBundlesV1ForceWithdrawVaultV2", "vault_v2_force_withdraw", chain.VaultExit
-	case "redeem-in-kind":
-		if r.family != "vaults-v2" {
-			return false
-		}
-		method, kind, bundle = "vaultExitBundlesV1InKindRedemptionVaultV2", "vault_v2_in_kind_redeem", chain.VaultExit
+	case "vault_v2.redeem_in_kind":
+		contract, method, to, maxCalls = "vaultExit", "vaultExitBundlesV1InKindRedemptionVaultV2", chain.VaultExitBundlesV1, 2
 	default:
-		return false
+		if len(calls) == 0 {
+			return nil, callError("action", nil)
+		}
+		return nil, callError("action", &calls[0])
 	}
-	if !callTo(final, bundle) || final.Kind != kind {
-		return false
+	call, err := selectMain(calls, maxCalls)
+	if err != nil {
+		return nil, err
 	}
-	a, ok := decode(methods[method], final, body.Origin, true)
-	if !ok || address(a["vault"]) != vault || !limits(body, a) {
-		return false
+	if !validAddress(intent.Asset) {
+		return nil, &CalldataTargetError{detail("asset", &call, nil)}
 	}
-	switch r.action {
-	case "deposit":
-		if !amounts(body.Amount, a, "assets", "", false) || !positive(a["maxSharePriceE27"]) {
-			return false
-		}
-		cap = number(a["assets"])
-		if !funding(body, final.Value, token, chain, cap) {
-			return false
-		}
-		if final.Value != "0" {
-			cap = nil
-		}
-		for _, call := range calls[:len(calls)-1] {
-			if callTo(call, vault) {
-				return false
-			}
-		}
-	case "withdraw":
-		if !amounts(body.Amount, a, "assets", "shares", true) {
-			return false
-		}
-		cap = maxUint256
-	case "force-withdraw":
-		if !amounts(body.Amount, a, "exitAssets", "", false) ||
-			!positive(a["minSharePriceE27"]) || address(a["adapter"]) == zeroAddress {
-			return false
-		}
-		cap = maxUint256
-	case "redeem-in-kind":
-		if !amounts(body.Amount, a, "exitAssets", "", false) || address(a["adapter"]) == zeroAddress {
-			return false
-		}
-		markets := reflect.ValueOf(a["marketParamsList"])
-		id, market := splitSelector(body.Market)
-		if id != r.chain || markets.Len() != 1 ||
-			!marketMatches(methods["blueBundlesV1Supply"], "marketParams", markets.Index(0).Interface(), market) {
-			return false
-		}
-		cap = maxUint256
+	if err := target(call, to); err != nil {
+		return nil, err
 	}
-	return (r.action == "deposit" || final.Value == "0") &&
-		prerequisites(calls[:len(calls)-1], chain, bundle, token, cap, false)
+	if method != "vaultBundlesV1Deposit" {
+		if err := expectZeroValue(call); err != nil {
+			return nil, err
+		}
+	}
+	decoded, err := decodeCall(call, defaultSnapshot.abis[contract], false)
+	if err != nil {
+		return nil, err
+	}
+	if decoded.FunctionName != method {
+		return nil, callError("function", &call)
+	}
+	if method == "multicall" {
+		return verifyVaultForceRedeem(intent, decoded)
+	}
+	if !sameAddress(decoded.Args[0].(common.Address).Hex(), intent.Vault) {
+		return nil, &CalldataTargetError{detail("vault", &call, nil)}
+	}
+	prefix := calls[:len(calls)-1]
+	switch method {
+	case "vaultBundlesV1Deposit":
+		return verifyVaultDeposit(intent, decoded, prefix, chain)
+	case "vaultBundlesV1Withdraw":
+		return verifyVaultWithdraw(intent, decoded, prefix)
+	default:
+		return verifyVaultExit(intent, decoded, prefix)
+	}
 }
 
-func verifyVaultMulticall(call Call, vault common.Address, body request) bool {
-	if body.Amount.Value != "" || call.Kind != "vault_v2_force_redeem" || call.Value != "0" || !callTo(call, vault) {
-		return false
+func checkAssets(actual *big.Int, requested Amount, call CalldataCall) error {
+	return checkNamedAssets(actual, requested, "amount", call)
+}
+
+func checkNamedAssets(actual *big.Int, requested Amount, field string, call CalldataCall) error {
+	if requested.Unit != "assets" {
+		return amountError(field+".unit", call)
 	}
-	a, ok := decode(methods["multicall"], call, body.Origin, true)
-	inner, valid := a["data"].([][]byte)
-	if !ok || !valid || len(inner) < 2 {
-		return false
+	n, err := readUint(requested.Value, field, call)
+	if err != nil {
+		return err
 	}
-	account := common.HexToAddress(body.Account)
-	for _, data := range inner[:len(inner)-1] {
-		d, ok := decode(methods["forceDeallocate"], Call{Data: "0x" + hex.EncodeToString(data)}, "", false)
-		marketData, valid := d["data"].([]byte)
-		if !ok || !valid || len(marketData) != 160 || address(d["adapter"]) == zeroAddress ||
-			address(d["onBehalf"]) != account || !positive(d["assets"]) {
-			return false
+	if actual.Sign() == 0 || actual.Cmp(n) != 0 {
+		return amountError(field, call)
+	}
+	return nil
+}
+
+func verifyVaultDeposit(intent VaultCalldataIntent, main DecodedCalldataCall, prefix []CalldataCall, chain Deployment) ([]DecodedCalldataCall, error) {
+	call, args := main.Call, main.Args
+	assets, price := args[1].(*big.Int), args[2].(*big.Int)
+	if err := checkAssets(assets, intent.Amount, call); err != nil {
+		return nil, err
+	}
+	if price.Sign() == 0 || price.Cmp(maxUint256) == 0 {
+		return nil, amountError("max_share_price", call)
+	}
+	if err := checkFee(args[4].(*big.Int), args[5].(common.Address), intent.MaxFeeBPS, intent.ReferralFee, call); err != nil {
+		return nil, err
+	}
+	value, err := readUint(call.Value, "value", call)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkNativeBudget(value, intent.Funding, call); err != nil {
+		return nil, err
+	}
+	permit := reflect.ValueOf(args[3])
+	kind, data := uint8(permit.Field(0).Uint()), permit.Field(1).Bytes()
+	if kind == 0 {
+		if len(data) != 0 {
+			return nil, &CalldataDecodeError{detail("permit.data", &call, nil)}
 		}
-		for i := 0; i < 128; i += 32 {
-			for _, padding := range marketData[i : i+12] {
-				if padding != 0 {
-					return false
-				}
+	} else {
+		params, ok := defaultSnapshot.permits[kind]
+		if !ok {
+			return nil, callError("permit.kind", &call)
+		}
+		if _, err := unpackCanonical(params, data, true); err != nil {
+			return nil, &CalldataDecodeError{detail("permit.data", &call, nil)}
+		}
+	}
+	if value.Sign() != 0 {
+		if !sameAddress(intent.Asset, chain.WNative) {
+			return nil, &CalldataTargetError{detail("asset", &call, nil)}
+		}
+		if value.Cmp(assets) != 0 {
+			return nil, amountError("value", call)
+		}
+		if kind != 0 {
+			return nil, callError("permit", &call)
+		}
+	}
+	if len(prefix) == 0 {
+		return []DecodedCalldataCall{main}, nil
+	}
+	approval := prefix[len(prefix)-1]
+	if value.Sign() != 0 || kind != 0 {
+		return nil, callError("approval", &approval)
+	}
+	verified, err := checkApproval(approval, call.To, intent.Asset, assets, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(prefix) == 1 {
+		return []DecodedCalldataCall{verified, main}, nil
+	}
+	reset, err := checkApproval(prefix[0], call.To, intent.Asset, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	if reset.Args[1].(*big.Int).Sign() != 0 {
+		return nil, amountError("approval.amount", reset.Call)
+	}
+	return []DecodedCalldataCall{reset, verified, main}, nil
+}
+
+func checkVaultSharePermit(raw any, main CalldataCall, prefix []CalldataCall, min *big.Int) error {
+	permit := reflect.ValueOf(raw)
+	value := permit.Field(0).Interface().(*big.Int)
+	signed := !permit.Field(3).IsZero() || !permit.Field(4).IsZero() || !permit.Field(5).IsZero()
+	if len(prefix) != 0 && (signed || value.Sign() != 0) {
+		return callError("approval", &prefix[0])
+	}
+	if signed && (value.Sign() == 0 || (min != nil && value.Cmp(min) < 0)) {
+		return amountError("permit.value", main)
+	}
+	return nil
+}
+
+func verifyVaultWithdraw(intent VaultCalldataIntent, main DecodedCalldataCall, prefix []CalldataCall) ([]DecodedCalldataCall, error) {
+	call, args := main.Call, main.Args
+	assets, shares := args[1].(*big.Int), args[2].(*big.Int)
+	switch intent.Amount.Unit {
+	case "assets", "shares":
+		n, err := readUint(intent.Amount.Value, "amount", call)
+		if err != nil {
+			return nil, err
+		}
+		if (intent.Amount.Unit == "assets" && (assets.Cmp(n) != 0 || shares.Sign() != 0)) ||
+			(intent.Amount.Unit == "shares" && (shares.Cmp(n) != 0 || assets.Sign() != 0)) {
+			return nil, amountError("amount", call)
+		}
+	case "all":
+		if assets.Sign() != 0 {
+			return nil, amountError("amount", call)
+		}
+	default:
+		return nil, amountError("amount.unit", call)
+	}
+	if (assets.Sign() == 0) == (shares.Sign() == 0) {
+		return nil, amountError("amount", call)
+	}
+	if err := checkVaultSharePermit(args[3], call, prefix, shares); err != nil {
+		return nil, err
+	}
+	fee, to := args[4].(*big.Int), args[5].(common.Address)
+	if err := checkFee(fee, to, intent.MaxFeeBPS, intent.ReferralFee, call); err != nil {
+		return nil, err
+	}
+	if intent.Amount.Unit == "all" && fee.Sign() > 0 {
+		if err := recipient(to, intent.Account, "referral_fee.recipient", call); err != nil {
+			return nil, err
+		}
+	}
+	return finishVaultExit(intent, main, prefix, shares)
+}
+
+func finishVaultExit(intent VaultCalldataIntent, main DecodedCalldataCall, prefix []CalldataCall, min *big.Int) ([]DecodedCalldataCall, error) {
+	if len(prefix) == 0 {
+		return []DecodedCalldataCall{main}, nil
+	}
+	approval, err := checkApproval(prefix[0], main.Call.To, intent.Vault, min, false)
+	if err != nil {
+		return nil, err
+	}
+	return []DecodedCalldataCall{approval, main}, nil
+}
+
+func verifyVaultExit(intent VaultCalldataIntent, main DecodedCalldataCall, prefix []CalldataCall) ([]DecodedCalldataCall, error) {
+	call, args := main.Call, main.Args
+	if main.FunctionName == "vaultExitBundlesV1ForceWithdrawVaultV2" {
+		if err := checkAssets(args[2].(*big.Int), intent.Amount, call); err != nil {
+			return nil, err
+		}
+		if args[3].(*big.Int).Sign() == 0 {
+			return nil, amountError("min_share_price", call)
+		}
+		if err := checkFee(args[5].(*big.Int), args[6].(common.Address), intent.MaxFeeBPS, intent.ReferralFee, call); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := checkAssets(args[3].(*big.Int), intent.Amount, call); err != nil {
+			return nil, err
+		}
+		markets := reflect.ValueOf(args[2])
+		if markets.Len() != 1 {
+			return nil, &CalldataTargetError{detail("market", &call, nil)}
+		}
+		market := markets.Index(0)
+		encoded, err := defaultSnapshot.market.Pack(market.Interface())
+		if err != nil || fmt.Sprintf("%d:%s", intent.ChainID, crypto.Keccak256Hash(encoded).Hex()) != strings.ToLower(intent.Market) {
+			return nil, &CalldataTargetError{detail("market", &call, nil)}
+		}
+		if !sameAddress(market.Field(0).Interface().(common.Address).Hex(), intent.Asset) {
+			return nil, &CalldataTargetError{detail("asset", &call, nil)}
+		}
+	}
+	if err := checkVaultSharePermit(args[4], call, prefix, nil); err != nil {
+		return nil, err
+	}
+	return finishVaultExit(intent, main, prefix, nil)
+}
+
+func verifyVaultForceRedeem(intent VaultCalldataIntent, main DecodedCalldataCall) ([]DecodedCalldataCall, error) {
+	subcalls := main.Args[0].([][]byte)
+	if len(subcalls) < 2 {
+		return nil, callError("function", &main.Call)
+	}
+	routes := make(map[string]bool)
+	main.Calls = make([]DecodedCalldataCall, 0, len(subcalls))
+	contract := defaultSnapshot.abis["vault"]
+	for i, data := range subcalls {
+		call := innerCalldata(main.Call, data, i)
+		part, err := decodeCall(call, contract, true)
+		if err != nil {
+			return nil, err
+		}
+		if i == len(subcalls)-1 {
+			err = checkVaultRedeem(intent, part)
+		} else {
+			err = checkVaultDeallocate(intent, part, routes, defaultSnapshot.market)
+		}
+		if err != nil {
+			return nil, err
+		}
+		main.Calls = append(main.Calls, part)
+	}
+	return []DecodedCalldataCall{main}, nil
+}
+
+func checkVaultRedeem(intent VaultCalldataIntent, part DecodedCalldataCall) error {
+	call, args := part.Call, part.Args
+	if part.FunctionName != "redeem" {
+		return callError("function", &call)
+	}
+	if args[0].(*big.Int).Sign() == 0 {
+		return amountError("amount", call)
+	}
+	if err := recipient(args[1].(common.Address), intent.Account, "receiver", call); err != nil {
+		return err
+	}
+	return recipient(args[2].(common.Address), intent.Account, "owner", call)
+}
+
+func checkVaultDeallocate(intent VaultCalldataIntent, part DecodedCalldataCall, routes map[string]bool, market abi.Arguments) error {
+	call, args := part.Call, part.Args
+	if part.FunctionName != "forceDeallocate" {
+		return callError("function", &call)
+	}
+	if err := recipient(args[3].(common.Address), intent.Account, "onBehalf", call); err != nil {
+		return err
+	}
+	if args[2].(*big.Int).Sign() == 0 {
+		return amountError("amount", call)
+	}
+	data := args[1].([]byte)
+	if len(data) != 0 {
+		params, err := unpackCanonical(market, data, true)
+		if err != nil {
+			if err == errNonCanonical {
+				err = nil
 			}
+			return &CalldataDecodeError{detail("adapterData", &call, err)}
+		}
+		loanToken := reflect.ValueOf(params[0]).Field(0).Interface().(common.Address)
+		if !sameAddress(loanToken.Hex(), intent.Asset) {
+			return &CalldataTargetError{detail("asset", &call, nil)}
 		}
 	}
-	redeem, ok := decode(methods["redeem"], Call{Data: "0x" + hex.EncodeToString(inner[len(inner)-1])}, "", false)
-	return ok && positive(redeem["shares"]) && address(redeem["receiver"]) == account && address(redeem["owner"]) == account
+	key := string(args[0].(common.Address).Bytes()) + string(data)
+	if routes[key] {
+		return callError("forceDeallocate", &call)
+	}
+	routes[key] = true
+	return nil
 }
