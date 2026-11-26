@@ -141,6 +141,16 @@ func TestBlueReallocations(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireError[*CalldataCallError](t, verify(idle, idle), "reallocations", &call.ID)
+	t.Run("market source without adapter", func(t *testing.T) {
+		bad := market
+		bad.SourceAdapter = common.Address{}
+		requireError[*CalldataCallError](t, verify(bad), "reallocations", &call.ID)
+	})
+	t.Run("market source equals destination", func(t *testing.T) {
+		bad := market
+		bad.SourceMarketParams = bad.MarketParams
+		requireError[*CalldataCallError](t, verify(bad), "reallocations", &call.ID)
+	})
 	for name, modify := range map[string]func(*blueReallocation){
 		"destination":    func(e *blueReallocation) { e.MarketParams = market.SourceMarketParams },
 		"amount":         func(e *blueReallocation) { e.Assets = new(big.Int) },
