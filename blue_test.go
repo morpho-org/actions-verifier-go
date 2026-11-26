@@ -9,6 +9,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+func TestParityBlue(t *testing.T) {
+	runParity(t, "blue", parityIntent[BlueCalldataIntent], nil)
+}
+
 // blue.test.ts: "requires authorization for native Blue supply" and
 // "rejects native Blue funding with an embedded ERC-2612 permit".
 func TestBlueNativeSupply(t *testing.T) {
