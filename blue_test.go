@@ -9,6 +9,152 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// blue.test.ts: "requires authorization for native Blue supply" and
+// "rejects native Blue funding with an embedded ERC-2612 permit".
+func TestBlueNativeSupply(t *testing.T) {
+	vector := loadVectors[BlueCalldataIntent](t, "blue-vectors.json")["supply_allowanceSufficient"]
+	call := vector.Calls[0]
+	intent := vector.Intent
+	value := intent.Amount.Value
+	var params blueMarketParams
+	call = changeArgs(t, "blueBundle", call, func(args []any) {
+		params = converted[blueMarketParams](args[0])
+		params.LoanToken = common.HexToAddress(defaultSnapshot.Deployments[intent.ChainID].WNative)
+		args[0] = params
+	})
+	intent.Market = blueMarketID(params)
+	call.Value = value
+	intent.Funding = &Funding{Type: "native", MaxNativeAssets: value}
+	if _, err := VerifyCalldata(intent, []CalldataCall{call}); err != nil {
+		t.Fatal(err)
+	}
+	for _, funding := range []*Funding{nil, {Type: "unknown", MaxNativeAssets: value}, {Type: "auto", MaxNativeAssets: "1"}} {
+		changed := intent
+		changed.Funding = funding
+		_, err := VerifyCalldata(changed, []CalldataCall{call})
+		requireError[*CalldataAmountError](t, err, "value", &call.ID)
+	}
+	wrongValue := call
+	wrongValue.Value = "1"
+	_, err := VerifyCalldata(intent, []CalldataCall{wrongValue})
+	requireError[*CalldataAmountError](t, err, "value", &call.ID)
+	wrongToken := vector.Calls[0]
+	wrongToken.Value = value
+	original := vector.Intent
+	original.Funding = intent.Funding
+	_, err = VerifyCalldata(original, []CalldataCall{wrongToken})
+	requireError[*CalldataAmountError](t, err, "value", &call.ID)
+	sig := signature{V: 27, R: [32]byte{1}, S: [32]byte{1}}
+	permitted := changeArgs(t, "blueBundle", call, func(args []any) {
+		args[2] = tokenPermit{Kind: 1, Data: bluePermitData(t, sig)}
+	})
+	_, err = VerifyCalldata(intent, []CalldataCall{permitted})
+	requireError[*CalldataAmountError](t, err, "value", &call.ID)
+}
+
+func bluePermitData(t *testing.T, sig signature) []byte {
+	t.Helper()
+	data, err := defaultSnapshot.permits[1].Pack(big.NewInt(1820000000), sig.V, sig.R, sig.S)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// blue.test.ts: checks embedded funding permit kinds and ABI payloads,
+// malformed Morpho authorization signatures, and duplicate authorization.
+func TestBlueEmbeddedSignatures(t *testing.T) {
+	vectors := loadVectors[BlueCalldataIntent](t, "blue-vectors.json")
+	supply := vectors["supply_allowanceSufficient"]
+	withdraw := vectors["withdraw_assets"]
+	call := supply.Calls[0]
+	sig := signature{V: 27, R: [32]byte{1}, S: [32]byte{1}}
+	permit := func(kind uint8, data []byte) CalldataCall {
+		return changeArgs(t, "blueBundle", call, func(args []any) { args[2] = tokenPermit{Kind: kind, Data: data} })
+	}
+	valid := bluePermitData(t, sig)
+	if _, err := VerifyCalldata(supply.Intent, []CalldataCall{permit(1, valid)}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := VerifyCalldata(supply.Intent, []CalldataCall{permit(2, valid)})
+	requireError[*CalldataCallError](t, err, "permit.kind", &call.ID)
+	badSigs := []signature{
+		{V: 29, R: sig.R, S: sig.S}, {V: 27, S: sig.S}, {V: 27, R: sig.R},
+	}
+	malformed := [][]byte{nil, append(append([]byte{}, valid...), 0)}
+	for _, bad := range badSigs {
+		malformed = append(malformed, bluePermitData(t, bad))
+	}
+	for _, bad := range malformed {
+		_, err := VerifyCalldata(supply.Intent, []CalldataCall{permit(1, bad)})
+		requireError[*CalldataDecodeError](t, err, "permit.data", &call.ID)
+	}
+	grant, exit := withdraw.Calls[0], withdraw.Calls[1]
+	auth := func(sig signature) CalldataCall {
+		return changeArgs(t, "blueBundle", exit, func(args []any) {
+			args[3] = struct {
+				Signature       signature
+				Nonce, Deadline *big.Int
+			}{sig, big.NewInt(0), big.NewInt(1820000000)}
+		})
+	}
+	signed := auth(sig)
+	if _, err := VerifyCalldata(withdraw.Intent, []CalldataCall{signed}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = VerifyCalldata(withdraw.Intent, []CalldataCall{grant, signed})
+	requireError[*CalldataCallError](t, err, "authorization", &grant.ID)
+	badSigs[0].V = 0
+	for _, bad := range badSigs {
+		_, err := VerifyCalldata(withdraw.Intent, []CalldataCall{auth(bad)})
+		requireError[*CalldataDecodeError](t, err, "authorization.signature", &exit.ID)
+	}
+}
+
+// blue.test.ts: "accepts distinct idle and market sources, and rejects invalid reallocations".
+func TestBlueReallocations(t *testing.T) {
+	vector := loadVectors[BlueCalldataIntent](t, "blue-vectors.json")["borrow_exactAssets"]
+	grant, call := vector.Calls[0], vector.Calls[1]
+	decoded, err := decodeCall(call, defaultSnapshot.abis["blueBundle"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := converted[blueMarketParams](decoded.Args[0])
+	idle := blueReallocation{
+		Vault: common.HexToAddress(otherAccount), Adapter: common.HexToAddress("0x1000000000000000000000000000000000000003"),
+		MarketParams: params, SourceMarketParams: params, FromIdle: true, Assets: big.NewInt(123),
+	}
+	market := idle
+	market.FromIdle, market.SourceAdapter, market.SourceMarketParams.Irm = false, idle.Adapter, idle.Vault
+	verify := func(entries ...blueReallocation) error {
+		changed := changeArgs(t, "blueBundle", call, func(args []any) {
+			args[6] = entries
+		})
+		_, err := VerifyCalldata(vector.Intent, []CalldataCall{grant, changed})
+		return err
+	}
+	if err := verify(idle, market); err != nil {
+		t.Fatal(err)
+	}
+	requireError[*CalldataCallError](t, verify(idle, idle), "reallocations", &call.ID)
+	for name, modify := range map[string]func(*blueReallocation){
+		"destination":    func(e *blueReallocation) { e.MarketParams = market.SourceMarketParams },
+		"amount":         func(e *blueReallocation) { e.Assets = new(big.Int) },
+		"vault":          func(e *blueReallocation) { e.Vault = common.Address{} },
+		"adapter":        func(e *blueReallocation) { e.Adapter = common.Address{} },
+		"loan token":     func(e *blueReallocation) { e.SourceMarketParams.LoanToken = common.Address{} },
+		"source adapter": func(e *blueReallocation) { e.SourceAdapter = e.Adapter },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := idle
+			modify(&bad)
+			requireError[*CalldataCallError](t, verify(bad), "reallocations", &call.ID)
+		})
+	}
+	idle.Penalty = 1
+	requireError[*CalldataFeeError](t, verify(idle), "reallocations.penalty", &call.ID)
+}
+
 // blue.test.ts: verifies each prepared case and rejects another market.
 func TestBlueVectors(t *testing.T) {
 	for name, vector := range loadVectors[BlueCalldataIntent](t, "blue-vectors.json") {
