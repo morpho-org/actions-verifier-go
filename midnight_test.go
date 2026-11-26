@@ -109,3 +109,81 @@ func TestMidnightCoreCollateralWithdrawal(t *testing.T) {
 	childID := call.ID + ".0"
 	requireError[*CalldataDecodeError](t, err, "data", &childID)
 }
+
+// midnightSdk.test.ts: "rejects reduceOnly=$reduceOnly for $action".
+func TestMidnightSellWithdrawal(t *testing.T) {
+	vector := loadVectors[MidnightMarketIntent](t, "midnight-vectors.json")["borrow_exactUnits"]
+	grant, call := vector.Calls[0], vector.Calls[1]
+	for _, action := range []string{"midnight.borrow", "midnight.withdraw"} {
+		t.Run(action, func(t *testing.T) {
+			intent := vector.Intent
+			intent.Action = action
+			reduceOnly := action == "midnight.withdraw"
+			if reduceOnly {
+				intent.CollateralSupplies = nil
+			}
+			sell := func(reduceOnly bool) CalldataCall {
+				return changeArgs(t, "midnightBundle", call, func(args []any) {
+					args[3] = reduceOnly
+				})
+			}
+			if _, err := VerifyCalldata(intent, []CalldataCall{grant, sell(reduceOnly)}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := VerifyCalldata(intent, []CalldataCall{grant, sell(!reduceOnly)})
+			requireError[*CalldataCallError](t, err, "offers", &call.ID)
+			if action == "midnight.withdraw" {
+				intent.Amount.Unit = "all"
+				_, err = VerifyCalldata(intent, []CalldataCall{grant, sell(reduceOnly)})
+				requireError[*CalldataCallError](t, err, "offers", &call.ID)
+			}
+		})
+	}
+}
+
+// midnight.test.ts: all-mode core redemption rejects zero, not positive unit counts.
+func TestMidnightAllRedemptionUnits(t *testing.T) {
+	vector := loadVectors[MidnightMarketIntent](t, "midnight-vectors.json")["redeem_all"]
+	for _, units := range []int64{0, 1, 200} {
+		call := changeArgs(t, "midnight", vector.Calls[0], func(args []any) {
+			args[1] = big.NewInt(units)
+		})
+		_, err := VerifyCalldata(vector.Intent, []CalldataCall{call})
+		if units == 0 {
+			requireError[*CalldataAmountError](t, err, "amount", &call.ID)
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// midnight.test.ts: "rejects a lend whose pull exceeds the request's maximum assets".
+func TestMidnightUnitsBuyPull(t *testing.T) {
+	vector := loadVectors[MidnightMarketIntent](t, "midnight-vectors.json")["lend_exactUnits"]
+	intent := vector.Intent
+	cap, ok := new(big.Int).SetString(intent.Guard.Value, 10)
+	if !ok {
+		t.Fatal("invalid fixture guard")
+	}
+	bound := cap.Add(cap, big.NewInt(1))
+	last := len(vector.Calls) - 1
+	calls := slices.Clone(vector.Calls)
+	calls[last] = changeArgs(t, "midnightBundle", calls[last], func(args []any) {
+		args[2] = bound
+	})
+	_, err := VerifyCalldata(intent, calls)
+	requireError[*CalldataAmountError](t, err, "guard.value", &calls[last].ID)
+
+	intent.Guard = &MidnightGuard{Type: "min_units", Value: intent.Amount.Value}
+	calls[0] = changeArgs(t, "erc20", calls[0], func(args []any) {
+		args[1] = new(big.Int).Sub(bound, big.NewInt(1))
+	})
+	_, err = VerifyCalldata(intent, calls)
+	requireError[*CalldataAmountError](t, err, "approval.amount", &calls[0].ID)
+	calls[0] = changeArgs(t, "erc20", calls[0], func(args []any) {
+		args[1] = bound
+	})
+	if _, err = VerifyCalldata(intent, calls); err != nil {
+		t.Fatal(err)
+	}
+}
