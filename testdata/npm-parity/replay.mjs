@@ -112,7 +112,11 @@ function replay(label, verify) {
     for (const [index, { intent, calls }] of vectors.entries()) {
       let matches;
       try {
-        matches = isDeepStrictEqual(verify(intent, calls).map(({ call }) => call), calls);
+        const decoded = verify(intent, calls);
+        matches = isDeepStrictEqual(decoded.map(({ call }) => call), calls) &&
+          decoded.every(({ functionName, args }) =>
+            typeof functionName === "string" && functionName.length > 0 &&
+            (family !== "vault" || (Array.isArray(args) && args.length > 0)));
       } catch {
         matches = false;
       }
