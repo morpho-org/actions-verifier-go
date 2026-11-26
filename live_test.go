@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+type liveCase struct {
+	Path   string              `json:"path"`
+	Body   json.RawMessage     `json:"body"`
+	Intent VaultCalldataIntent `json:"intent"`
+}
+
 func TestLiveActions(t *testing.T) {
 	host := os.Getenv("ACTIONS_API_URL")
 	cases := os.Getenv("ACTIONS_API_CASES")
@@ -29,7 +35,7 @@ func TestLiveActions(t *testing.T) {
 	if err != nil {
 		t.Fatal("set ACTIONS_API_CASES to a readable JSON array of intents")
 	}
-	var intents []Intent
+	var intents []liveCase
 	if json.Unmarshal(input, &intents) != nil || len(intents) == 0 {
 		t.Fatal("ACTIONS_API_CASES must contain a nonempty JSON array of intents")
 	}
@@ -40,22 +46,19 @@ func TestLiveActions(t *testing.T) {
 		},
 	}
 	var denied bool
-	for _, intent := range intents {
-		var body request
-		if json.Unmarshal(intent.Body, &body) != nil {
-			t.Error("invalid test intent body")
-			continue
-		}
-		r, ok := parseRoute(intent.Path, body.ChainID)
-		if !ok || !nonzeroAddress(body.Account) {
+	for _, sample := range intents {
+		intent := sample.Intent
+		if !strings.HasPrefix(sample.Path, "/") || strings.HasPrefix(sample.Path, "//") ||
+			!strings.HasPrefix(intent.Action, "vault_") || !nonzeroAddress(intent.Account) ||
+			!nonzeroAddress(intent.Vault) || !validAddress(intent.Asset) || len(sample.Body) == 0 {
 			t.Error("invalid test intent")
 			continue
 		}
-		t.Run(r.family+"/"+r.action, func(t *testing.T) {
+		t.Run(intent.Action, func(t *testing.T) {
 			if denied {
-				t.Skipf("chain %d: not run after authentication failure", r.chain)
+				t.Skipf("chain %d: not run after authentication failure", intent.ChainID)
 			}
-			denied = checkLive(t, client, strings.TrimRight(base.String(), "/"), key, intent, r.chain)
+			denied = checkLive(t, client, strings.TrimRight(base.String(), "/"), key, sample)
 		})
 	}
 }
@@ -132,9 +135,10 @@ func TestLiveActionsConfiguration(t *testing.T) {
 	}
 }
 
-func checkLive(t *testing.T, client *http.Client, base, key string, intent Intent, chain uint64) bool {
+func checkLive(t *testing.T, client *http.Client, base, key string, sample liveCase) bool {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+intent.Path, bytes.NewReader(intent.Body))
+	chain := sample.Intent.ChainID
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+sample.Path, bytes.NewReader(sample.Body))
 	if err != nil {
 		t.Errorf("chain %d: cannot construct request", chain)
 		return false
@@ -164,7 +168,7 @@ func checkLive(t *testing.T, client *http.Client, base, key string, intent Inten
 	var result struct {
 		Data struct {
 			Status string
-			Calls  []Call
+			Calls  []CalldataCall
 		}
 	}
 	if json.NewDecoder(io.LimitReader(res.Body, 8<<20)).Decode(&result) != nil {
@@ -172,10 +176,10 @@ func checkLive(t *testing.T, client *http.Client, base, key string, intent Inten
 	} else {
 		switch result.Data.Status {
 		case "prepared":
-			if Verify(intent, result.Data.Calls) {
-				t.Logf("chain %d: verified true", chain)
+			if _, err := VerifyCalldata(sample.Intent, result.Data.Calls); err == nil {
+				t.Logf("chain %d: calldata verified", chain)
 			} else {
-				t.Errorf("chain %d: verifier returned false on prepared response", chain)
+				t.Errorf("chain %d: verifier rejected prepared response: %v", chain, err)
 			}
 		case "simulation_failed":
 			t.Errorf("chain %d: simulation failed; check account or position prerequisites", chain)
