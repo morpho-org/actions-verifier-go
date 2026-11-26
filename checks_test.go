@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -84,4 +86,51 @@ func TestApprovalAndCanonicalEncoding(t *testing.T) {
 	zero.Data += "0"
 	_, err = decodeCall(zero, contract, false)
 	requireError[*CalldataDecodeError](t, err, "data", &call.ID)
+}
+
+func TestCanonicalEncodingRejectsNarrowIntegerOverflow(t *testing.T) {
+	contract, err := abi.JSON(strings.NewReader(`[
+		{"type":"function","name":"unsigned","inputs":[{"name":"value","type":"uint128"}]},
+		{"type":"function","name":"signed","inputs":[{"name":"value","type":"int128"}]},
+		{"type":"function","name":"nested","inputs":[{"name":"values","type":"tuple[]","components":[{"name":"values","type":"uint128[1]"}]}]}
+	]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := big.NewInt(1)
+	uintLimit := new(big.Int).Lsh(one, 128)
+	intLimit := new(big.Int).Lsh(one, 127)
+	maxUnsigned := new(big.Int).Sub(uintLimit, one)
+	minSigned := new(big.Int).Neg(intLimit)
+	type tuple struct{ Values [1]*big.Int }
+	for _, tc := range []struct {
+		name, method string
+		arg          any
+		ok           bool
+	}{
+		{"unsigned_max", "unsigned", maxUnsigned, true},
+		{"unsigned_overflow", "unsigned", uintLimit, false},
+		{"signed_max", "signed", new(big.Int).Sub(intLimit, one), true},
+		{"signed_overflow", "signed", intLimit, false},
+		{"signed_min", "signed", minSigned, true},
+		{"signed_underflow", "signed", new(big.Int).Sub(minSigned, one), false},
+		{"nested_max", "nested", []tuple{{Values: [1]*big.Int{maxUnsigned}}}, true},
+		{"nested_overflow", "nested", []tuple{{Values: [1]*big.Int{uintLimit}}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := contract.Pack(tc.method, tc.arg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			call := CalldataCall{ID: tc.name, Data: "0x" + common.Bytes2Hex(data)}
+			decoded, err := decodeCall(call, contract, true)
+			if !tc.ok {
+				requireError[*CalldataDecodeError](t, err, "data", &call.ID)
+				return
+			}
+			if err != nil || decoded.FunctionName != tc.method {
+				t.Fatalf("got %v, %v; want decoded %s", decoded, err, tc.method)
+			}
+		})
+	}
 }

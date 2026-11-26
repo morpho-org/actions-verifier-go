@@ -106,6 +106,17 @@ func TestMidnightOfferVectors(t *testing.T) {
 	}
 }
 
+func TestMidnightCancellationRejectsOutOfRangeConsumed(t *testing.T) {
+	vector := loadVectors[MidnightOfferManagementIntent](t, "midnight-offers-vectors.json")["batchCancellation"]
+	bad := changeArgs(t, "midnight", vector.Calls[0], func(args []any) {
+		children := args[0].([][]byte)
+		children[0][4+32+15] = 1
+	})
+	_, err := VerifyCalldata(vector.Intent, []CalldataCall{bad})
+	childID := bad.ID + ".0"
+	requireError[*CalldataDecodeError](t, err, "data", &childID)
+}
+
 // midnightOffers.test.ts: checks the group, market, amount, optional maker, and every fill.
 func TestMidnightTakeBindings(t *testing.T) {
 	vector := loadVectors[MidnightTakeIntent](t, "midnight-offers-vectors.json")["exactAssets"]
