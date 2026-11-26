@@ -170,11 +170,12 @@ def main():
             + ",\n".join("    " + json.dumps(row, separators=(",", ":"), sort_keys=True) for row in rows)
             + '\n  ]\n}\n'
         )
+        data = output.encode("utf-8")
         if args.check:
-            if not path.is_file() or path.read_text() != output:
+            if not path.is_file() or path.read_bytes() != data:
                 stale.append(path.name)
         else:
-            path.write_text(output)
+            path.write_bytes(data)
         print(f"{path.name}: {len(declarations)} declarations, {len(rows)} cases")
     if stale:
         raise SystemExit("Stale parity fixtures: " + ", ".join(stale))
