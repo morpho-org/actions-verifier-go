@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 PACKAGE = r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*"
 LOCK_PATH = re.compile(rf"(?:node_modules/{PACKAGE}/)*node_modules/({PACKAGE})")
+EXACT_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 
 def validate_members(archive):
@@ -30,7 +31,7 @@ def validate_members(archive):
 def install_package(path, entry, archive):
     matched = LOCK_PATH.fullmatch(path)
     version = entry["version"]
-    if not matched or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+    if not matched or not EXACT_VERSION.fullmatch(version):
         raise ValueError("invalid package path or version in lockfile")
     name = matched[1]
     filename = name.rsplit("/", 1)[-1]
@@ -59,10 +60,21 @@ def install_package(path, entry, archive):
 
 
 def main():
+    manifest = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     lockfile = json.loads((ROOT / "package-lock.json").read_text(encoding="utf-8"))
     if lockfile["lockfileVersion"] != 3:
         raise ValueError("expected an npm v3 lockfile")
-    entries = {path: entry for path, entry in lockfile["packages"].items() if path}
+    packages = lockfile["packages"]
+    dependencies = manifest["dependencies"]
+    if not dependencies or dependencies != packages[""]["dependencies"]:
+        raise ValueError("package.json dependencies do not match the lockfile root")
+    for name, version in dependencies.items():
+        if not EXACT_VERSION.fullmatch(version):
+            raise ValueError(f"package.json must pin an exact version for {name}")
+        if packages.get(f"node_modules/{name}", {}).get("version") != version:
+            raise ValueError(f"package.json version for {name} does not match its locked package entry")
+
+    entries = {path: entry for path, entry in packages.items() if path}
     if not entries:
         raise ValueError("lockfile contains no registry tarballs")
 
