@@ -117,6 +117,10 @@ function replay(label, verify) {
           decoded.every(({ functionName, args }) =>
             typeof functionName === "string" && functionName.length > 0 &&
             (family !== "vault" || (Array.isArray(args) && args.length > 0)));
+        if (matches && intent.action === "midnight.cancel_offers" &&
+            (intent.groups.length > 1 || decoded[0]?.functionName === "multicall")) {
+          matches = decoded[0]?.calls?.length === intent.groups.length;
+        }
       } catch {
         matches = false;
       }
