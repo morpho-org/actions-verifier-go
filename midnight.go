@@ -120,6 +120,7 @@ type midnightContext struct {
 	intent MidnightMarketIntent
 	chain  Deployment
 	call   CalldataCall
+	take   *MidnightTakeIntent
 }
 
 func (c midnightContext) market(raw any) (midnightMarket, error) {
@@ -149,7 +150,11 @@ func (c midnightContext) market(raw any) (midnightMarket, error) {
 	prefix := common.FromHex("0x600b380380600b5f395ff3")
 	creationHash := crypto.Keccak256(prefix, encoded)
 	id := crypto.Keccak256Hash([]byte{255}, market.Midnight[:], make([]byte, 32), creationHash)
-	if !strings.EqualFold(id.Hex(), c.intent.Market) {
+	selector := c.intent.Market
+	if c.take != nil {
+		selector = *c.take.MarketID
+	}
+	if !strings.EqualFold(id.Hex(), selector) {
 		return market, err(nil)
 	}
 	return market, nil
@@ -178,6 +183,10 @@ func verifyMidnight(intent MidnightMarketIntent, calls []CalldataCall, chain Dep
 	default:
 		return nil, unknownMidnightAction(calls)
 	}
+	return verifyMidnightCalls(intent, nil, calls, chain)
+}
+
+func verifyMidnightCalls(intent MidnightMarketIntent, take *MidnightTakeIntent, calls []CalldataCall, chain Deployment) ([]DecodedCalldataCall, error) {
 	call, err := selectMain(calls, math.MaxInt)
 	if err != nil {
 		return nil, err
@@ -185,9 +194,20 @@ func verifyMidnight(intent MidnightMarketIntent, calls []CalldataCall, chain Dep
 	if (intent.Action == "midnight.repay" && intent.Type != "direct") || (intent.Action == "midnight.market_repay" && intent.Type != "market") {
 		return nil, callError("type", &call)
 	}
-	c := midnightContext{intent, chain, call}
+	if intent.Action == "midnight.supply_collateral_take_borrow" && len(intent.CollateralSupplies) == 0 {
+		return nil, callError("collateral_supplies", &call)
+	}
+	c := midnightContext{intent, chain, call, take}
 	if err := c.checkGuardType(); err != nil {
 		return nil, err
+	}
+	if take != nil {
+		if take.MarketID == nil {
+			return nil, &CalldataUnsupportedError{detail("market_id", &call, nil)}
+		}
+		if !validGroup(take.Group) {
+			return nil, &CalldataTargetError{detail("group", &call, nil)}
+		}
 	}
 	prefix := calls[:len(calls)-1]
 	if sameAddress(call.To, chain.Midnight) {
@@ -476,11 +496,11 @@ func (c midnightContext) checkGuardType() error {
 		return nil
 	}
 	switch c.intent.Action {
-	case "midnight.lend", "midnight.market_repay":
+	case "midnight.lend", "midnight.market_repay", "midnight.take_lend":
 		if guard.Type == "min_units" || guard.Type == "max_assets" {
 			return nil
 		}
-	case "midnight.borrow", "midnight.withdraw", "midnight.redeem":
+	case "midnight.borrow", "midnight.withdraw", "midnight.redeem", "midnight.take_borrow", "midnight.supply_collateral_take_borrow":
 		if guard.Type == "max_units" || guard.Type == "min_assets" {
 			return nil
 		}
@@ -512,7 +532,7 @@ func (c midnightContext) amountGuard(unit string, target, bound *big.Int) error 
 
 func (c midnightContext) buy(args []any, unit string) ([]midnightPull, error) {
 	direct := c.intent.Action == "midnight.repay"
-	lend := c.intent.Action == "midnight.lend"
+	lend := c.intent.Action == "midnight.lend" || c.intent.Action == "midnight.take_lend"
 	repay := c.intent.Action == "midnight.market_repay"
 	if !direct && !lend && !repay {
 		return nil, callError("function", &c.call)
@@ -583,7 +603,7 @@ func (c midnightContext) buy(args []any, unit string) ([]midnightPull, error) {
 }
 
 func (c midnightContext) sell(args []any, unit string) ([]midnightPull, error) {
-	borrow := c.intent.Action == "midnight.borrow"
+	borrow := c.intent.Action == "midnight.borrow" || c.intent.Action == "midnight.take_borrow" || c.intent.Action == "midnight.supply_collateral_take_borrow"
 	withdraw := c.intent.Action == "midnight.withdraw"
 	if !borrow && !withdraw {
 		return nil, callError("function", &c.call)
@@ -614,7 +634,7 @@ func (c midnightContext) sell(args []any, unit string) ([]midnightPull, error) {
 	}
 	var requested []MidnightCollateralTransfer
 	var invalidList bool
-	if borrow {
+	if c.intent.Action == "midnight.borrow" || c.intent.Action == "midnight.supply_collateral_take_borrow" {
 		requested, invalidList = c.intent.CollateralSupplies, c.intent.nullSupplies
 	}
 	pulls, err := c.collateral(midnightTransfers(args[5]), requested, market, "", invalidList)
@@ -633,6 +653,7 @@ func (c midnightContext) sell(args []any, unit string) ([]midnightPull, error) {
 }
 
 func (c midnightContext) fills(entries reflect.Value, buy bool) error {
+	var firstMaker common.Address
 	for i := 0; i < entries.Len(); i++ {
 		entry := entries.Index(i)
 		offer := entry.FieldByName("Offer")
@@ -642,6 +663,21 @@ func (c midnightContext) fills(entries reflect.Value, buy bool) error {
 		maker := offer.FieldByName("Maker").Interface().(common.Address)
 		if offer.FieldByName("Buy").Bool() != buy || entry.FieldByName("Units").Interface().(*big.Int).Sign() == 0 || sameAddress(maker.Hex(), c.intent.Account) {
 			return callError("offer_fills", &c.call)
+		}
+		if c.take != nil {
+			group := common.Hash(offer.FieldByName("Group").Interface().([32]byte))
+			if !strings.EqualFold(group.Hex(), c.take.Group) {
+				return &CalldataTargetError{detail("group", &c.call, nil)}
+			}
+			if offer.FieldByName("ReduceOnly").Bool() {
+				return &CalldataUnsupportedError{detail("offer.reduce_only", &c.call, nil)}
+			}
+			if i == 0 {
+				firstMaker = maker
+			}
+			if c.take.Maker == nil && maker != firstMaker || c.take.Maker != nil && !sameAddress(maker.Hex(), *c.take.Maker) {
+				return callError("offer_fills", &c.call)
+			}
 		}
 	}
 	return nil

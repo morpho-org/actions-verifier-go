@@ -84,6 +84,21 @@ limits. Explicit amount guards are checked; rate guards are unsupported.
 Slippage against a quote, live liquidity, and actual execution amounts need
 external checks or simulation.
 
+### Supported Midnight offer actions
+
+- Use `MidnightTakeIntent` for `midnight.take_borrow`,
+  `midnight.supply_collateral_take_borrow`, and `midnight.take_lend`.
+  Supply the requested market ID, group, amount, and guard. If a maker was
+  requested, the verifier checks every fill against it; otherwise all fills
+  must use the same maker. Reduce-only offers are unsupported for takes.
+- Use `MidnightOfferManagementIntent` for `midnight.cancel_offers` and
+  `midnight.withdraw_funding`. A cancellation must consume the requested groups
+  in full. Funding withdrawals must be share-based Blue withdrawals from the
+  requested owner and market to the intended account.
+- `midnight.make_borrow`, `midnight.make_lend`, `midnight.make_repay`, and
+  `midnight.make_withdraw` return `CalldataUnsupportedError`. The verifier
+  does not interpret their compressed offer payloads.
+
 The default registry and ABIs are embedded from the pinned
 `@morpho-org/calldata-verifier` reference. For additional trusted deployments,
 construct a `Registry` with `NewRegistry` and supply it in `VerifyOptions`.
@@ -134,7 +149,7 @@ simulate before signing. Approvals can persist beyond the action.
 go test -race ./...
 ```
 
-The shared Vault, Blue, and Midnight market vectors and the ABI and deployment snapshot under `testdata/`
+The shared Vault, Blue, Midnight market, and Midnight offer vectors and the ABI and deployment snapshot under `testdata/`
 record their source commit. Regenerate with
 `bun generate-snapshot.ts /path/to/pinned-sdk-checkout` after installing the
 pinned checkout's lockfile dependencies. Go builds and tests do not use Bun.

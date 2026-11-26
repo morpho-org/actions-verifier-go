@@ -1,10 +1,11 @@
 // Package calldataverifier checks ordered Morpho Actions API wallet calls against
 // the original intent without network access or execution.
 //
-// VerifyCalldata decodes and checks Vault, Blue, and Midnight market calls, returning typed
-// errors for failed checks. Supply the original market or vault, amounts,
+// VerifyCalldata checks Vault, Blue, and supported Midnight market and offer
+// calls, returning typed errors for failed checks. Supply the original intent,
 // funding, and fee limits independently of the response.
 // Invoke the verified calls only from the intended account and chain.
+// Midnight make-offer actions are unsupported.
 //
 // A successful check is not a simulation, state check, or signature verification.
 // Verify state-dependent price, deadline and penalty limits and simulate

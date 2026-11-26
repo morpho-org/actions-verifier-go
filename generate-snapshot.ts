@@ -62,8 +62,8 @@ const snapshot = {
 };
 await Bun.write(join(import.meta.dir, "testdata/sdk-snapshot.json"), JSON.stringify(snapshot) + "\n");
 
-for (const [name, exported] of [["vault", "vaultCases"], ["blue", "blueCases"], ["midnight", "midnightCases"]]) {
-  const fixtures = await source(`packages/calldata-verifier/src/test/${name}.fixtures.ts`);
+for (const [name, exported, file = name] of [["vault", "vaultCases"], ["blue", "blueCases"], ["midnight", "midnightCases"], ["midnight-offers", "midnightOfferCases", "midnightOffers"]]) {
+  const fixtures = await source(`packages/calldata-verifier/src/test/${file}.fixtures.ts`);
   await Bun.write(
     join(import.meta.dir, `testdata/${name}-vectors.json`),
     JSON.stringify({ revision, cases: fixtures[exported] }, null, 2) + "\n",

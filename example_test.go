@@ -70,3 +70,18 @@ func ExampleVerifyCalldata_midnight() {
 	}
 	// Output: calls
 }
+
+func ExampleVerifyCalldata_unsupportedOffer() {
+	intent := calldataverifier.MidnightOfferManagementIntent{
+		CommonIntent: calldataverifier.CommonIntent{
+			Action: "midnight.make_lend", ChainID: 8453,
+			Account: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+		},
+	}
+	_, err := calldataverifier.VerifyCalldata(intent, []calldataverifier.CalldataCall{})
+	var unsupported *calldataverifier.CalldataUnsupportedError
+	if errors.As(err, &unsupported) {
+		fmt.Println(unsupported.Field)
+	}
+	// Output: midnight.make_lend
+}

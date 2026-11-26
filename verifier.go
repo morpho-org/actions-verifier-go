@@ -169,6 +169,14 @@ func VerifyCalldata(intent CalldataIntent, calls []CalldataCall, options ...Veri
 		return verifyMidnight(i, calls, chain)
 	case *MidnightMarketIntent:
 		return verifyMidnight(*i, calls, chain)
+	case MidnightTakeIntent:
+		return verifyMidnightTake(i, calls, chain)
+	case *MidnightTakeIntent:
+		return verifyMidnightTake(*i, calls, chain)
+	case MidnightOfferManagementIntent:
+		return verifyMidnightOffer(i, calls, chain)
+	case *MidnightOfferManagementIntent:
+		return verifyMidnightOffer(*i, calls, chain)
 	}
 	return nil, callError("action", first)
 }
