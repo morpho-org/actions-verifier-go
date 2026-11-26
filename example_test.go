@@ -50,3 +50,23 @@ func ExampleVerifyCalldata_blue() {
 	}
 	// Output: calls
 }
+
+func ExampleVerifyCalldata_midnight() {
+	intent := calldataverifier.MidnightMarketIntent{
+		CommonIntent: calldataverifier.CommonIntent{
+			Action: "midnight.lend", ChainID: 8453,
+			Account: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+		},
+		Market:  "0x0000000000000000000000000000000000000000000000000000000000000001",
+		Amount:  calldataverifier.Amount{Unit: "units", Value: "1000000"},
+		Guard:   &calldataverifier.MidnightGuard{Type: "max_assets", Value: "1000000"},
+		Funding: &calldataverifier.Funding{Type: "erc20"},
+	}
+	// Use the calls returned for this request rather than an empty slice.
+	_, err := calldataverifier.VerifyCalldata(intent, []calldataverifier.CalldataCall{})
+	var callError *calldataverifier.CalldataCallError
+	if errors.As(err, &callError) {
+		fmt.Println(callError.Field)
+	}
+	// Output: calls
+}

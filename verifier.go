@@ -165,6 +165,10 @@ func VerifyCalldata(intent CalldataIntent, calls []CalldataCall, options ...Veri
 		return verifyBlue(i, calls, chain)
 	case *BlueCalldataIntent:
 		return verifyBlue(*i, calls, chain)
+	case MidnightMarketIntent:
+		return verifyMidnight(i, calls, chain)
+	case *MidnightMarketIntent:
+		return verifyMidnight(*i, calls, chain)
 	}
 	return nil, callError("action", first)
 }

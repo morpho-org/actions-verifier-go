@@ -66,6 +66,24 @@ fee caps, and reallocation structure. It does not check actual positions,
 liquidity, authorization state, or state-derived share and all-mode amounts.
 Blue reallocation legs with nonzero penalties are rejected.
 
+### Supported Midnight market actions
+
+Use `MidnightMarketIntent` with the original market ID and requested amounts.
+
+| Intent | Inputs |
+| --- | --- |
+| `midnight.lend`, `midnight.borrow` | Assets or units, with an optional amount guard. Borrow can include collateral supplies. |
+| `midnight.repay` | `Type: "direct"`; assets or all, with optional collateral withdrawals. |
+| `midnight.market_repay` | `Type: "market"`; assets or units, with optional collateral withdrawals and an amount guard. |
+| `midnight.withdraw`, `midnight.redeem` | Assets, units, or all as supported by the call form. |
+| `midnight.supply_collateral`, `midnight.withdraw_collateral` | The collateral token and amount; withdrawals can use multiple core calls inside a multicall. |
+
+The verifier binds encoded market parameters and collateral indices to the
+intent, and checks owners, receivers, fees, offer fill shape, and native funding
+limits. Explicit amount guards are checked; rate guards are unsupported.
+Slippage against a quote, live liquidity, and actual execution amounts need
+external checks or simulation.
+
 The default registry and ABIs are embedded from the pinned
 `@morpho-org/calldata-verifier` reference. For additional trusted deployments,
 construct a `Registry` with `NewRegistry` and supply it in `VerifyOptions`.
@@ -116,7 +134,7 @@ simulate before signing. Approvals can persist beyond the action.
 go test -race ./...
 ```
 
-The shared Vault and Blue vectors and the ABI and deployment snapshot under `testdata/`
+The shared Vault, Blue, and Midnight market vectors and the ABI and deployment snapshot under `testdata/`
 record their source commit. Regenerate with
 `bun generate-snapshot.ts /path/to/pinned-sdk-checkout` after installing the
 pinned checkout's lockfile dependencies. Go builds and tests do not use Bun.
