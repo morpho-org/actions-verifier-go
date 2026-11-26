@@ -1,7 +1,7 @@
 # TypeScript test parity
 
-Reference: `@morpho-org/calldata-verifier` at
-`71a07c480538fe4925d27411bd95d95a1b93b4ae`.
+Reference: the source of `@morpho-org/calldata-verifier@0.0.0`,
+`67a76c819ec35b7b27d67bae71ee4b27a38336f3`.
 
 All **208 declarations** are accounted for: **23 mapped** to existing Go
 tests, **176 ported** as **787 distinct verifier inputs**, and **9 JS-only**.

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const revision = "71a07c480538fe4925d27411bd95d95a1b93b4ae";
+const revision = "67a76c819ec35b7b27d67bae71ee4b27a38336f3";
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: bun generate-snapshot.ts <pinned SDK checkout>");
 const root = resolve(checkout);

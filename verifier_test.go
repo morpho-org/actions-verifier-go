@@ -13,7 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-const vectorRevision = "71a07c480538fe4925d27411bd95d95a1b93b4ae"
+const vectorRevision = "67a76c819ec35b7b27d67bae71ee4b27a38336f3"
 const otherAccount = "0x3000000000000000000000000000000000000003"
 const zeroAddress = "0x0000000000000000000000000000000000000000"
 
