@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math/big"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -93,6 +94,41 @@ func parityArg(value reflect.Value) any {
 
 var parityReference = regexp.MustCompile(`"\$p([0-9]+)"`)
 
+func TestParityFixturePins(t *testing.T) {
+	generator, err := os.ReadFile("generate-snapshot.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := regexp.MustCompile(`(?m)^const revision = "([a-f0-9]{40})";$`).FindSubmatch(generator)
+	if len(pin) != 2 || string(pin[1]) != vectorRevision {
+		t.Fatal("generator and Go vector pins differ")
+	}
+	var snapshot struct{ Revision string }
+	if err := json.Unmarshal(snapshotJSON, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Revision != vectorRevision {
+		t.Fatal("SDK snapshot revision differs from the generator pin")
+	}
+	files, err := filepath.Glob("testdata/ts-parity-*.json")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("expected parity fixtures: %v", err)
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fixture struct{ Revision string }
+		if err := json.Unmarshal(raw, &fixture); err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		if fixture.Revision != vectorRevision {
+			t.Fatalf("%s is not generated at %s; run generate-parity.py", file, vectorRevision)
+		}
+	}
+}
+
 func runParity(t *testing.T, family string, intent func([]byte) (CalldataIntent, error), verify func(CalldataIntent, []CalldataCall, json.RawMessage) ([]DecodedCalldataCall, error)) {
 	t.Helper()
 	data, err := os.ReadFile("testdata/ts-parity-" + family + ".json")
@@ -145,10 +181,12 @@ func runParity(t *testing.T, family string, intent func([]byte) (CalldataIntent,
 					t.Fatalf("want JSON type error on %q, got %v", *field, err)
 				}
 				got := mismatch.Field
-				if i := strings.LastIndexByte(got, '.'); i >= 0 {
-					got = got[i+1:]
+				path := strings.Split(got, ".")
+				last := path[len(path)-1]
+				if _, err := strconv.Atoi(last); err == nil && len(path) > 1 {
+					last = path[len(path)-2]
 				}
-				if got != *field {
+				if !strings.EqualFold(last, *field) {
 					t.Fatalf("want JSON type error on %q, got %v", *field, err)
 				}
 				return
