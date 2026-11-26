@@ -40,7 +40,7 @@ mapped = {
     ("verifyCalldata", 40): "TestVaultVectors",
     ("verifyCalldata", 86): "TestCalldataCallJSON",
     ("blue", 32): "TestBlueVectors",
-    ("midnight", 52): "TestMidnightMarketVectors",
+    ("midnight", 53): "TestMidnightMarketVectors",
 }
 json_type_errors = {
     ("verifyCalldata", 96, "calls"): "",

@@ -54,12 +54,13 @@ type MidnightCollateralParams struct {
 // redemption, or collateral action.
 type MidnightMarketIntent struct {
 	CommonIntent
-	Market                                   string                       `json:"market"`
-	ExpiresAt                                *uint64                      `json:"expires_at,omitempty"`
-	Type                                     string                       `json:"type,omitempty"`
-	Amount                                   Amount                       `json:"amount,omitempty"`
-	Guard                                    *MidnightGuard               `json:"guard,omitempty"`
-	MarketParams                             *MidnightMarketParams        `json:"market_params,omitempty"`
+	Market       string                `json:"market"`
+	ExpiresAt    *uint64               `json:"expires_at,omitempty"`
+	Type         string                `json:"type,omitempty"`
+	Amount       Amount                `json:"amount,omitempty"`
+	Guard        *MidnightGuard        `json:"guard,omitempty"`
+	MarketParams *MidnightMarketParams `json:"market_params,omitempty"`
+	// Funding permits native value on supported Midnight bundles, including standalone collateral supply.
 	Funding                                  *Funding                     `json:"funding,omitempty"`
 	ReferralFee                              *ReferralFee                 `json:"referral_fee,omitempty"`
 	AllowPartial                             *bool                        `json:"allow_partial,omitempty"`
@@ -230,6 +231,8 @@ func verifyMidnightCalls(intent MidnightMarketIntent, take *MidnightTakeIntent, 
 		pulls, err = c.sell(decoded.Args, "assets")
 	case "midnightBundlesV2SupplyCollateralAndSellWithUnitsTarget":
 		pulls, err = c.sell(decoded.Args, "units")
+	case "midnightBundlesV2CancelAndMake":
+		pulls, err = c.supplyCollateralWithNative(decoded.Args)
 	default:
 		err = callError("function", &call)
 	}
@@ -593,7 +596,7 @@ func (c midnightContext) buy(args []any, unit string) ([]midnightPull, error) {
 	if wrapped == market.LoanToken {
 		cap = maxAssets
 	}
-	if err := c.native(wrapped, cap); err != nil {
+	if err := c.native(wrapped, cap, false); err != nil {
 		return nil, err
 	}
 	if maxAssets.Sign() == 0 {
@@ -649,7 +652,51 @@ func (c midnightContext) sell(args []any, unit string) ([]midnightPull, error) {
 			break
 		}
 	}
-	return pulls, c.native(wrapped, cap)
+	return pulls, c.native(wrapped, cap, false)
+}
+
+func (c midnightContext) supplyCollateralWithNative(args []any) ([]midnightPull, error) {
+	if c.intent.Action != "midnight.supply_collateral" {
+		return nil, callError("function", &c.call)
+	}
+	var zeroAddress common.Address
+	var zeroHash [32]byte
+	blueMarket := converted[blueMarketParams](args[0])
+	emptyBlueMarket := blueMarket.LoanToken == zeroAddress &&
+		blueMarket.CollateralToken == zeroAddress && blueMarket.Oracle == zeroAddress &&
+		blueMarket.Irm == zeroAddress && blueMarket.Lltv.Sign() == 0
+	emptyPublication := args[5].(common.Address) == zeroAddress &&
+		args[6].([32]byte) == zeroHash && args[7].(*big.Int).Sign() == 0 &&
+		args[8].(*big.Int).Sign() == 0 && args[9].(*big.Int).Sign() == 0 &&
+		args[10].(uint8) == 0 && args[11].([32]byte) == zeroHash &&
+		args[12].([32]byte) == zeroHash && reflect.ValueOf(args[13]).Len() == 0 &&
+		len(args[14].([]byte)) == 0
+	if !emptyBlueMarket || args[1].(*big.Int).Sign() != 0 ||
+		args[2].([32]byte) != zeroHash || !emptyPublication {
+		return nil, callError("cancel_and_make", &c.call)
+	}
+	if args[15].(*big.Int).Sign() == 0 {
+		return nil, amountError("deadline", c.call)
+	}
+	market, err := c.market(args[3])
+	if err != nil {
+		return nil, err
+	}
+	pulls, err := c.collateral(midnightTransfers(args[4]), []MidnightCollateralTransfer{
+		{Collateral: c.intent.Collateral, Amount: c.intent.Amount},
+	}, market, "", false)
+	if err != nil {
+		return nil, err
+	}
+	wrapped := args[16].(common.Address)
+	cap := new(big.Int)
+	for _, pull := range pulls {
+		if pull.token == wrapped {
+			cap = pull.assets
+			break
+		}
+	}
+	return pulls, c.native(wrapped, cap, true)
 }
 
 func (c midnightContext) fills(entries reflect.Value, buy bool) error {
@@ -683,12 +730,12 @@ func (c midnightContext) fills(entries reflect.Value, buy bool) error {
 	return nil
 }
 
-func (c midnightContext) native(wrapped common.Address, cap *big.Int) error {
+func (c midnightContext) native(wrapped common.Address, cap *big.Int, requireValue bool) error {
 	value, err := readUint(c.call.Value, "value", c.call)
 	if err != nil {
 		return err
 	}
-	if value.Sign() == 0 && wrapped == (common.Address{}) {
+	if !requireValue && value.Sign() == 0 && wrapped == (common.Address{}) {
 		return nil
 	}
 	if value.Sign() == 0 || !sameAddress(wrapped.Hex(), c.chain.WNative) || value.Cmp(cap) > 0 {

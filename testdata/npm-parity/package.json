@@ -2,7 +2,7 @@
   "name": "calldata-verifier-npm-parity",
   "private": true,
   "dependencies": {
-    "@morpho-org/calldata-verifier": "0.1.0",
-    "@morpho-org/morpho-sdk": "10.3.0"
+    "@morpho-org/calldata-verifier": "0.2.0",
+    "@morpho-org/morpho-sdk": "10.3.1"
   }
 }

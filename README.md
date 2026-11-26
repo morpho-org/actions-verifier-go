@@ -45,13 +45,12 @@ coverage, not whether the API can prepare a particular action or whether it
 will succeed on-chain.
 
 <!-- chain-support:start -->
-| Chain IDs | Vault deposits and withdrawals | Vault native deposits | Vault bundled exits | Blue bundle actions | Midnight bundles | Midnight core calls and cancellation | Midnight funding withdrawal |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1, 4663, 8453, 42161 | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| 10, 130, 137, 143, 196, 480, 999, 747474 | Yes | Yes | Yes | Yes | — | — | Yes |
-| 14, 25, 50, 56, 146, 239, 252, 714, 1135, 1329, 1672, 1868, 2741, 2818, 4326, 8217, 16661, 34443, 42220, 42793, 43111, 57073, 59144, 98866, 200901, 534352, 685689, 21000000, 123420001114 | — | — | — | — | — | — | Yes |
-| 988, 29032 | Yes | — | Yes | Yes | — | — | Yes |
-| 4217, 5042 | Yes | — | Yes | Yes | Yes | Yes | Yes |
+| Chain IDs | Vault deposits and withdrawals | Vault native deposits | Vault bundled exits | Blue bundle actions | Midnight bundles | Midnight native collateral supply | Midnight core calls and cancellation | Midnight funding withdrawal |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1, 10, 130, 137, 143, 480, 4663, 8453, 42161, 747474 | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| 14, 25, 50, 56, 146, 239, 252, 714, 1135, 1329, 1672, 1868, 2741, 2818, 4326, 8217, 16661, 34443, 42220, 42793, 43111, 57073, 59144, 98866, 200901, 534352, 685689, 21000000, 123420001114 | — | — | — | — | — | — | — | Yes |
+| 196, 999 | Yes | Yes | Yes | Yes | — | — | — | Yes |
+| 988, 4217, 5042, 29032 | Yes | — | Yes | Yes | Yes | — | Yes | Yes |
 <!-- chain-support:end -->
 
 Vault deposits with nonzero native value require a wrapped native token
@@ -106,7 +105,17 @@ Use `MidnightMarketIntent` with the original market ID and requested amounts.
 | `midnight.repay` | `Type: "direct"`; assets or all, with optional collateral withdrawals. |
 | `midnight.market_repay` | `Type: "market"`; assets or units, with optional collateral withdrawals and an amount guard. |
 | `midnight.withdraw`, `midnight.redeem` | Assets, units, or all as supported by the call form. |
-| `midnight.supply_collateral`, `midnight.withdraw_collateral` | The collateral token and amount; withdrawals can use multiple core calls inside a multicall. |
+| `midnight.supply_collateral` | The collateral token and asset amount, with optional `Funding` for the native bundle route. |
+| `midnight.withdraw_collateral` | The collateral token and amount; withdrawals can use multiple core calls inside a multicall. |
+
+Standalone collateral supply supports direct Midnight `supplyCollateral` with
+zero native value and no authorization prerequisite. For native funding, use
+`Funding.Type` of `"native"` or `"auto"`. The bundle must supply the chain's
+wrapped-native token and carry positive value no greater than either
+`Funding.MaxNativeAssets` or the collateral amount. The bundle must have a
+nonzero deadline, and its Blue parking, offer publication, and cancellation
+fields must be empty. A wrapped-native approval and a bundle authorization
+can precede the supply.
 
 The verifier binds encoded market parameters and collateral indices to the
 intent, and checks owners, receivers, fees, offer fill shape, and native funding
@@ -130,7 +139,7 @@ external checks or simulation.
   does not interpret their compressed offer payloads.
 
 The default registry and ABIs are embedded from the pinned
-`@morpho-org/calldata-verifier` reference. For additional trusted deployments,
+`@morpho-org/calldata-verifier@0.2.0` reference. For additional trusted deployments,
 construct a `Registry` with `NewRegistry` and supply it in `VerifyOptions`.
 Registry construction copies the input, does not affect other verifications,
 and rejects any conflicting default address. Never populate the registry from

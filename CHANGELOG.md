@@ -1,11 +1,14 @@
 # Changelog
 
-## v0.1.0 (planned)
+## v0.2.0 (planned)
 
 - First Go release, matching
-  [`@morpho-org/calldata-verifier@0.1.0`](https://www.npmjs.com/package/@morpho-org/calldata-verifier/v/0.1.0).
+  [`@morpho-org/calldata-verifier@0.2.0`](https://www.npmjs.com/package/@morpho-org/calldata-verifier/v/0.2.0).
   It verifies supported Vault, Blue, and Midnight calldata offline, with
   optional ES256 Action Proof verification.
+- Supports native-funded standalone Midnight collateral supply without changing
+  the direct core route. The registry includes Midnight deployments on eight
+  additional chains.
 - Known limits: Vault native funding checks a budget but does not require a
   nonzero value. Midnight `make_*` actions are unsupported. Static
   verification is not a simulation or a check of current chain state. See
