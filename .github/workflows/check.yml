@@ -81,6 +81,33 @@ jobs:
           go test -race ./...
           printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
+  npm-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install checksum-verified Node.js
+        run: |
+          node_dir="$(mktemp -d "$RUNNER_TEMP/npm-parity-node.XXXXXXXXXX")"
+          cd "$node_dir"
+          version=26.13.1
+          archive="node-v${version}-linux-x64.tar.xz"
+          curl --fail --silent --show-error --location --retry 3 --proto '=https' --proto-redir '=https' \
+            --output "$archive" "https://nodejs.org/dist/v${version}/${archive}"
+          printf '%s  %s\n' '5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864' "$archive" | sha256sum --check --strict
+          tar --extract --xz --file "$archive" --strip-components=1
+          rm -rf -- lib/node_modules/npm lib/node_modules/corepack
+          rm -f -- bin/npm bin/npx bin/corepack
+          printf 'PARITY_NODE=%s/bin/node\n' "$node_dir" >> "$GITHUB_ENV"
+      - name: Fetch and verify locked registry tarballs
+        run: python3 testdata/npm-parity/install.py
+      - name: Replay published verifier offline
+        run: '"$PARITY_NODE" --permission --allow-fs-read="$PWD/testdata" testdata/npm-parity/replay.mjs'
+
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 5

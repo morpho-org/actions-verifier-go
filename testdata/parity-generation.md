@@ -31,5 +31,21 @@ the line-based exclusions and JSON input adaptations in `generate-parity.py`
 and `capture-parity.mjs`, and refresh the declaration inventory if present.
 Then run `go test -race ./...`. CI checks that every parity fixture's revision
 matches the generator and embedded snapshot and replays the fixtures offline.
+
+To also replay the committed expectations against both module formats of the
+published npm verifier, use Node.js 26.13.1, Python 3.11+, curl, and GNU tar.
+From a clean checkout, run:
+
+```sh
+python3 testdata/npm-parity/install.py
+node --permission --allow-fs-read="$PWD/testdata" testdata/npm-parity/replay.mjs
+```
+
+The npm check covers every captured case and shared vector. For malformed
+inputs that Go rejects during JSON decoding, it checks the separately recorded
+TypeScript error. CI downloads a checksum-pinned Node.js archive and removes
+npm and Corepack. The installer verifies the SHA-512 integrity of every npm
+tarball in the lockfile and extracts it without running package code. The
+replay runs with no Node.js network permission.
 Byte-for-byte regeneration requires access to the pinned source checkout, so
 run the companion command with `--check` before publishing a fixture update.
