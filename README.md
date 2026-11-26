@@ -13,7 +13,7 @@ Use Go 1.25.1 or newer. Until there is a release tag, install from `dev`:
 go get github.com/morpho-org/calldata-verifier-go@dev
 ```
 
-Import it as package `verifier`.
+Import it as package `calldataverifier`.
 
 ## Quick start
 
