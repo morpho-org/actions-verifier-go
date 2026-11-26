@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"math/big"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 var wad = big.NewInt(1_000_000_000_000_000_000)
 var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 var errNonCanonical = errors.New("noncanonical ABI encoding")
+var errABIIntegerWidth = errors.New("ABI integer exceeds its declared width")
 
 func sameAddress(a, b string) bool {
 	return validAddress(a) && validAddress(b) && strings.EqualFold(a, b)
@@ -95,6 +97,11 @@ func unpackCanonical(inputs abi.Arguments, data []byte, exact bool) ([]any, erro
 	if err != nil {
 		return nil, err
 	}
+	for i, arg := range args {
+		if !fitsABIIntegers(inputs[i].Type, reflect.ValueOf(arg)) {
+			return nil, errABIIntegerWidth
+		}
+	}
 	canonical, err := inputs.Pack(args...)
 	if err != nil {
 		return nil, err
@@ -106,6 +113,36 @@ func unpackCanonical(inputs abi.Arguments, data []byte, exact bool) ([]any, erro
 		args = []any{}
 	}
 	return args, nil
+}
+
+func fitsABIIntegers(t abi.Type, value reflect.Value) bool {
+	switch t.T {
+	case abi.IntTy, abi.UintTy:
+		if t.Size == 256 || value.Kind() != reflect.Pointer {
+			return true
+		}
+		n := value.Interface().(*big.Int)
+		if t.T == abi.UintTy {
+			return n.BitLen() <= t.Size
+		}
+		if n.Sign() < 0 {
+			n = new(big.Int).Not(n)
+		}
+		return n.BitLen() < t.Size
+	case abi.TupleTy:
+		for i, elem := range t.TupleElems {
+			if !fitsABIIntegers(*elem, value.Field(i)) {
+				return false
+			}
+		}
+	case abi.ArrayTy, abi.SliceTy:
+		for i := 0; i < value.Len(); i++ {
+			if !fitsABIIntegers(*t.Elem, value.Index(i)) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func decodeCall(call CalldataCall, contract abi.ABI, nested bool) (DecodedCalldataCall, error) {
