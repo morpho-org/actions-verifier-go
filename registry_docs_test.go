@@ -30,17 +30,19 @@ func TestDocumentedChainSupport(t *testing.T) {
 		}
 		groups[row] = append(groups[row], strconv.FormatUint(id, 10))
 	}
-	var rows strings.Builder
+	var expected strings.Builder
+	expected.WriteString("| Chain IDs | Vault deposits and withdrawals | Vault bundled exits | Blue bundle actions | Midnight bundles | Midnight core calls and cancellation | Midnight funding withdrawal |\n")
+	expected.WriteString("| --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, row := range order {
-		fmt.Fprintf(&rows, "| %s |", strings.Join(groups[row], ", "))
+		fmt.Fprintf(&expected, "| %s |", strings.Join(groups[row], ", "))
 		for _, supported := range row {
 			if supported {
-				rows.WriteString(" Yes |")
+				expected.WriteString(" Yes |")
 			} else {
-				rows.WriteString(" — |")
+				expected.WriteString(" — |")
 			}
 		}
-		rows.WriteByte('\n')
+		expected.WriteByte('\n')
 	}
 	readme, err := os.ReadFile("README.md")
 	if err != nil {
@@ -48,8 +50,7 @@ func TestDocumentedChainSupport(t *testing.T) {
 	}
 	_, section, foundStart := strings.Cut(strings.ReplaceAll(string(readme), "\r\n", "\n"), "<!-- chain-support:start -->\n")
 	table, _, foundEnd := strings.Cut(section, "<!-- chain-support:end -->")
-	lines := strings.SplitN(table, "\n", 3)
-	if !foundStart || !foundEnd || len(lines) != 3 || lines[2] != rows.String() {
-		t.Fatalf("update the README chain support rows to match the embedded registry:\n%s", rows.String())
+	if !foundStart || !foundEnd || table != expected.String() {
+		t.Fatalf("update the README chain support table to match the embedded registry:\n%s", expected.String())
 	}
 }
