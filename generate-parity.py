@@ -140,11 +140,12 @@ def main():
         compact = json.dumps(vector, separators=(",", ":"), sort_keys=True)
         grouped[family][name][compact] = vector
     stale = []
-    for family, vector_name in {
-        "blue": "blue", "midnight": "midnight", "offers": "midnight-offers",
-        "proof": "action-proof", "vault": "vault",
+    for family, test_file in {
+        "blue": "blue_test.go", "midnight": "midnight_test.go",
+        "offers": "midnight_offers_test.go", "proof": "action_proof_test.go",
+        "vault": "parity_test.go",
     }.items():
-        if not (fixture_dir / f"{vector_name}-vectors.json").is_file():
+        if not (root / test_file).is_file():
             continue
         path = fixture_dir / f"ts-parity-{family}.json"
         declarations = grouped[family]

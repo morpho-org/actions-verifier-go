@@ -99,7 +99,7 @@ func TestParityFixturePins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin := regexp.MustCompile(`(?m)^const revision = "([a-f0-9]{40})";$`).FindSubmatch(generator)
+	pin := regexp.MustCompile(`(?m)^const revision = "([a-f0-9]{40})";\r?$`).FindSubmatch(generator)
 	if len(pin) != 2 || string(pin[1]) != vectorRevision {
 		t.Fatal("generator and Go vector pins differ")
 	}

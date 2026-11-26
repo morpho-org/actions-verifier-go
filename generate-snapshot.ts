@@ -11,6 +11,11 @@ const git = (...args: string[]) =>
 if (git("rev-parse", "HEAD") !== revision || git("status", "--porcelain", "--untracked-files=no")) {
   throw new Error(`Expected a clean SDK checkout at ${revision}`);
 }
+execFileSync(
+  process.platform === "win32" ? "python" : "python3",
+  [join(import.meta.dir, "generate-parity.py"), root],
+  { stdio: "inherit" },
+);
 const source = (path: string) => import(pathToFileURL(join(root, path)).href);
 const [registry, common, bundles, blue, midnight, { erc20Abi }] = await Promise.all([
   source("packages/morpho-ts/src/addresses.ts"),

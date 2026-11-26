@@ -102,6 +102,10 @@ record their source commit. Regenerate with
 `bun generate-snapshot.ts /path/to/pinned-sdk-checkout` after installing the
 pinned checkout's lockfile dependencies. Go builds and tests do not use Bun.
 
+The snapshot command also runs `generate-parity.py` to regenerate the
+test parity fixtures. See [fixture regeneration](testdata/parity-generation.md)
+for the prerequisites and standalone freshness check.
+
 To opt into `TestLiveActions`, provide a JSON array with a `path` and `body`
 for each sent request and an `intent` for the independently retained verifier
 input. Use Vault actions with accounts that can prepare the requested operations.
