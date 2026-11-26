@@ -1,10 +1,10 @@
 # TypeScript test parity
 
-Reference: the source of `@morpho-org/calldata-verifier@0.1.0`,
-`9268b554ef77ce6e8dc18269fe8a3d8b767b9051`.
+Reference: the source of `@morpho-org/calldata-verifier@0.2.0`,
+`cbb912ca2585b8590cc5fb71189a9387b8cd06ca`.
 
-All **208 declarations** are accounted for: **23 mapped** to existing Go
-tests, **176 ported** as **787 distinct verifier inputs**, and **9 JS-only**.
+All **214 declarations** are accounted for: **23 mapped** to existing Go
+tests, **182 ported** as **837 distinct verifier inputs**, and **9 JS-only**.
 A declaration using `it.each` or `test.each` may expand to multiple tests. The
 parenthesized counts below are distinct verifier inputs per ported declaration,
 including distinct verifier calls made within a single test.
@@ -107,53 +107,58 @@ See [regeneration instructions](parity-generation.md) when updating the pin.
 | `checks.test.ts:85` | rejects trailing bytes only in nested calldata | 2 | Mapped: `TestApprovalAndCanonicalEncoding` |
 | `checks.test.ts:100` | rejects calldata with %s | 2 | Mapped: `TestApprovalAndCanonicalEncoding` |
 | `checks.test.ts:116` | rejects an odd hex suffix even when the decoded arguments are unchanged | 2 | Mapped: `TestApprovalAndCanonicalEncoding` |
-| `midnight.test.ts:37` | rejects all mode and unknown units on collateral supplies | 4 | Ported: `TestParityMidnight/midnight.test.ts:37` (2) |
-| `midnight.test.ts:52` | verifies %s and rejects another market | 4 | Mapped: `TestMidnightMarketVectors` |
-| `midnight.test.ts:64` | rejects different amounts and fees | 4 | Ported: `TestParityMidnight/midnight.test.ts:64` (2) |
-| `midnight.test.ts:77` | rejects $fixture.intent.action with the wrong repay type | 4 | Ported: `TestParityMidnight/midnight.test.ts:77` (4) |
-| `midnight.test.ts:104` | rejects a full direct repay with asset cap %s | 4 | Ported: `TestParityMidnight/midnight.test.ts:104` (3) |
-| `midnight.test.ts:141` | rejects a Midnight fee above the requested rate but within max_fee_bps | 4 | Ported: `TestParityMidnight/midnight.test.ts:141` (2) |
-| `midnight.test.ts:152` | accepts no guard on $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:152` (3) |
-| `midnight.test.ts:161` | checks approval tokens and authorization spender, owner, uniqueness and route | 4 | Ported: `TestParityMidnight/midnight.test.ts:161` (6) |
-| `midnight.test.ts:217` | rejects a registered spender that is not the Midnight call target | 4 | Ported: `TestParityMidnight/midnight.test.ts:217` (2) |
-| `midnight.test.ts:236` | requires an approval to cover the encoded pull on $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:236` (4) |
-| `midnight.test.ts:258` | requires a zero approval to be immediately followed by a positive approval | 4 | Ported: `TestParityMidnight/midnight.test.ts:258` (4) |
-| `midnight.test.ts:296` | rejects a Midnight prerequisite with %s authorization | 4 | Ported: `TestParityMidnight/midnight.test.ts:296` (2) |
-| `midnight.test.ts:332` | checks the side, units, maker, and receiver of a borrow | 4 | Ported: `TestParityMidnight/midnight.test.ts:332` (4) |
-| `midnight.test.ts:393` | rejects a Midnight borrow with $change | 4 | Ported: `TestParityMidnight/midnight.test.ts:393` (4) |
-| `midnight.test.ts:443` | rejects a Midnight borrow with $change | 4 | Ported: `TestParityMidnight/midnight.test.ts:443` (2) |
-| `midnight.test.ts:489` | rejects a Midnight lend with $change | 4 | Ported: `TestParityMidnight/midnight.test.ts:489` (2) |
-| `midnight.test.ts:531` | rejects a direct repay with tampered flags, fills or collateral receiver | 4 | Ported: `TestParityMidnight/midnight.test.ts:531` (7) |
-| `midnight.test.ts:630` | rejects a zero collateral receiver on a %s repay with a withdrawal | 4 | Ported: `TestParityMidnight/midnight.test.ts:630` (4) |
-| `midnight.test.ts:703` | rejects loan-token approval when direct repay only withdraws collateral | 4 | Ported: `TestParityMidnight/midnight.test.ts:703` (3) |
-| `midnight.test.ts:763` | checks zero and whole-balance collateral withdrawals on $intent.action ($intent.amount.unit) | 4 | Ported: `TestParityMidnight/midnight.test.ts:763` (20) |
-| `midnight.test.ts:860` | accepts a zero collateral receiver on repay-only $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:860` (2) |
-| `midnight.test.ts:911` | rejects a zero exact buy target | 4 | Ported: `TestParityMidnight/midnight.test.ts:911` (1) |
-| `midnight.test.ts:936` | rejects a finite units target for a full direct repay | 4 | Ported: `TestParityMidnight/midnight.test.ts:936` (2) |
-| `midnight.test.ts:965` | rejects an assets selector for a full direct repay even with a maximum target | 4 | Ported: `TestParityMidnight/midnight.test.ts:965` (1) |
-| `midnight.test.ts:991` | rejects a market repay with a maximum target in $unit mode | 4 | Ported: `TestParityMidnight/midnight.test.ts:991` (2) |
-| `midnight.test.ts:1030` | rejects an all-mode Midnight withdrawal via a units-target sell bundle | 4 | Ported: `TestParityMidnight/midnight.test.ts:1030` (1) |
-| `midnight.test.ts:1058` | rejects a decoded Midnight offer-publication selector as a market action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1058` (1) |
-| `midnight.test.ts:1109` | rejects a selector for $wrong.intent.action when verifying $requested.intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1109` (3) |
-| `midnight.test.ts:1142` | rejects zero exact core withdrawal and collateral amounts | 4 | Ported: `TestParityMidnight/midnight.test.ts:1142` (2) |
-| `midnight.test.ts:1192` | checks native value against the pull and verifies wrapped native token | 4 | Ported: `TestParityMidnight/midnight.test.ts:1192` (5) |
-| `midnight.test.ts:1297` | rejects rate guards that cannot be verified from calldata | 4 | Ported: `TestParityMidnight/midnight.test.ts:1297` (2) |
-| `midnight.test.ts:1314` | rejects wrong-side and unknown guards on %o | 4 | Ported: `TestParityMidnight/midnight.test.ts:1314` (8) |
-| `midnight.test.ts:1334` | rejects a missing amount on $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1334` (3) |
-| `midnight.test.ts:1348` | rejects malformed collateral withdrawal requests with typed errors | 4 | Ported: `TestParityMidnight/midnight.test.ts:1348` (3) |
-| `midnight.test.ts:1372` | rejects collateral withdrawals on a lend that carries a leftover list | 4 | Ported: `TestParityMidnight/midnight.test.ts:1372` (1) |
-| `midnight.test.ts:1418` | rejects a fee on $intent.action that carries a leftover referral fee | 4 | Ported: `TestParityMidnight/midnight.test.ts:1418` (2) |
-| `midnight.test.ts:1466` | rejects null collateral lists instead of treating them as omitted | 4 | Ported: `TestParityMidnight/midnight.test.ts:1466` (2) |
-| `midnight.test.ts:1485` | rejects non-asset and non-unit amounts on direct withdraw | 4 | Ported: `TestParityMidnight/midnight.test.ts:1485` (1) |
-| `midnight.test.ts:1496` | checks explicit guards against the primary target for $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1496` (6) |
-| `midnight.test.ts:1522` | rejects a lend whose pull exceeds the request's maximum assets | 4 | Ported: `TestParityMidnight/midnight.test.ts:1522` (1) |
-| `midnight.test.ts:1545` | rejects a units-target borrow that weakens a caller-specified minimum receipt | 4 | Ported: `TestParityMidnight/midnight.test.ts:1545` (2) |
-| `midnight.test.ts:1580` | requires the owner and receiver even for all withdrawals | 4 | Ported: `TestParityMidnight/midnight.test.ts:1580` (3) |
-| `midnight.test.ts:1609` | rejects zero encoded units for all-mode $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1609` (4) |
-| `midnight.test.ts:1634` | rejects a zero all-mode leg in a core collateral withdrawal | 4 | Ported: `TestParityMidnight/midnight.test.ts:1634` (2) |
-| `midnight.test.ts:1675` | rejects a reordered collateral list when checking the market hash | 4 | Ported: `TestParityMidnight/midnight.test.ts:1675` (1) |
-| `midnight.test.ts:1701` | decodes all multicall legs and rejects a malformed leg | 4 | Ported: `TestParityMidnight/midnight.test.ts:1701` (2) |
-| `midnight.test.ts:1717` | rejects a core collateral withdrawal with invalid $change | 4 | Ported: `TestParityMidnight/midnight.test.ts:1717` (4) |
+| `midnight.test.ts:38` | rejects all mode and unknown units on collateral supplies | 4 | Ported: `TestParityMidnight/midnight.test.ts:38` (2) |
+| `midnight.test.ts:53` | verifies %s and rejects another market | 4 | Mapped: `TestMidnightMarketVectors` |
+| `midnight.test.ts:65` | rejects different amounts and fees | 4 | Ported: `TestParityMidnight/midnight.test.ts:65` (2) |
+| `midnight.test.ts:78` | rejects $fixture.intent.action with the wrong repay type | 4 | Ported: `TestParityMidnight/midnight.test.ts:78` (4) |
+| `midnight.test.ts:105` | rejects a full direct repay with asset cap %s | 4 | Ported: `TestParityMidnight/midnight.test.ts:105` (3) |
+| `midnight.test.ts:142` | rejects a Midnight fee above the requested rate but within max_fee_bps | 4 | Ported: `TestParityMidnight/midnight.test.ts:142` (2) |
+| `midnight.test.ts:153` | accepts no guard on $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:153` (3) |
+| `midnight.test.ts:162` | checks approval tokens and authorization spender, owner, uniqueness and route | 4 | Ported: `TestParityMidnight/midnight.test.ts:162` (6) |
+| `midnight.test.ts:218` | rejects a registered spender that is not the Midnight call target | 4 | Ported: `TestParityMidnight/midnight.test.ts:218` (2) |
+| `midnight.test.ts:237` | requires an approval to cover the encoded pull on $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:237` (4) |
+| `midnight.test.ts:259` | requires a zero approval to be immediately followed by a positive approval | 4 | Ported: `TestParityMidnight/midnight.test.ts:259` (4) |
+| `midnight.test.ts:297` | rejects a Midnight prerequisite with %s authorization | 4 | Ported: `TestParityMidnight/midnight.test.ts:297` (2) |
+| `midnight.test.ts:333` | checks the side, units, maker, and receiver of a borrow | 4 | Ported: `TestParityMidnight/midnight.test.ts:333` (4) |
+| `midnight.test.ts:394` | rejects a Midnight borrow with $change | 4 | Ported: `TestParityMidnight/midnight.test.ts:394` (4) |
+| `midnight.test.ts:444` | rejects a Midnight borrow with $change | 4 | Ported: `TestParityMidnight/midnight.test.ts:444` (2) |
+| `midnight.test.ts:490` | rejects a Midnight lend with $change | 4 | Ported: `TestParityMidnight/midnight.test.ts:490` (2) |
+| `midnight.test.ts:532` | rejects a direct repay with tampered flags, fills or collateral receiver | 4 | Ported: `TestParityMidnight/midnight.test.ts:532` (7) |
+| `midnight.test.ts:631` | rejects a zero collateral receiver on a %s repay with a withdrawal | 4 | Ported: `TestParityMidnight/midnight.test.ts:631` (4) |
+| `midnight.test.ts:704` | rejects loan-token approval when direct repay only withdraws collateral | 4 | Ported: `TestParityMidnight/midnight.test.ts:704` (3) |
+| `midnight.test.ts:764` | checks zero and whole-balance collateral withdrawals on $intent.action ($intent.amount.unit) | 4 | Ported: `TestParityMidnight/midnight.test.ts:764` (20) |
+| `midnight.test.ts:861` | accepts a zero collateral receiver on repay-only $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:861` (2) |
+| `midnight.test.ts:912` | rejects a zero exact buy target | 4 | Ported: `TestParityMidnight/midnight.test.ts:912` (1) |
+| `midnight.test.ts:937` | rejects a finite units target for a full direct repay | 4 | Ported: `TestParityMidnight/midnight.test.ts:937` (2) |
+| `midnight.test.ts:966` | rejects an assets selector for a full direct repay even with a maximum target | 4 | Ported: `TestParityMidnight/midnight.test.ts:966` (1) |
+| `midnight.test.ts:992` | rejects a market repay with a maximum target in $unit mode | 4 | Ported: `TestParityMidnight/midnight.test.ts:992` (2) |
+| `midnight.test.ts:1031` | rejects an all-mode Midnight withdrawal via a units-target sell bundle | 4 | Ported: `TestParityMidnight/midnight.test.ts:1031` (1) |
+| `midnight.test.ts:1059` | rejects a decoded Midnight offer-publication selector as a market action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1059` (1) |
+| `midnight.test.ts:1110` | rejects a selector for $wrong.intent.action when verifying $requested.intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1110` (3) |
+| `midnight.test.ts:1143` | rejects zero exact core withdrawal and collateral amounts | 4 | Ported: `TestParityMidnight/midnight.test.ts:1143` (2) |
+| `midnight.test.ts:1193` | checks native value against the pull and verifies wrapped native token | 4 | Ported: `TestParityMidnight/midnight.test.ts:1193` (5) |
+| `midnight.test.ts:1298` | rejects rate guards that cannot be verified from calldata | 4 | Ported: `TestParityMidnight/midnight.test.ts:1298` (2) |
+| `midnight.test.ts:1315` | rejects wrong-side and unknown guards on %o | 4 | Ported: `TestParityMidnight/midnight.test.ts:1315` (8) |
+| `midnight.test.ts:1335` | rejects a missing amount on $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1335` (3) |
+| `midnight.test.ts:1349` | rejects malformed collateral withdrawal requests with typed errors | 4 | Ported: `TestParityMidnight/midnight.test.ts:1349` (3) |
+| `midnight.test.ts:1373` | rejects collateral withdrawals on a lend that carries a leftover list | 4 | Ported: `TestParityMidnight/midnight.test.ts:1373` (1) |
+| `midnight.test.ts:1419` | rejects a fee on $intent.action that carries a leftover referral fee | 4 | Ported: `TestParityMidnight/midnight.test.ts:1419` (2) |
+| `midnight.test.ts:1467` | rejects null collateral lists instead of treating them as omitted | 4 | Ported: `TestParityMidnight/midnight.test.ts:1467` (2) |
+| `midnight.test.ts:1486` | rejects non-asset and non-unit amounts on direct withdraw | 4 | Ported: `TestParityMidnight/midnight.test.ts:1486` (1) |
+| `midnight.test.ts:1497` | checks explicit guards against the primary target for $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1497` (6) |
+| `midnight.test.ts:1523` | rejects a lend whose pull exceeds the request's maximum assets | 4 | Ported: `TestParityMidnight/midnight.test.ts:1523` (1) |
+| `midnight.test.ts:1546` | rejects a units-target borrow that weakens a caller-specified minimum receipt | 4 | Ported: `TestParityMidnight/midnight.test.ts:1546` (2) |
+| `midnight.test.ts:1581` | requires the owner and receiver even for all withdrawals | 4 | Ported: `TestParityMidnight/midnight.test.ts:1581` (3) |
+| `midnight.test.ts:1610` | rejects zero encoded units for all-mode $intent.action | 4 | Ported: `TestParityMidnight/midnight.test.ts:1610` (4) |
+| `midnight.test.ts:1635` | rejects a zero all-mode leg in a core collateral withdrawal | 4 | Ported: `TestParityMidnight/midnight.test.ts:1635` (2) |
+| `midnight.test.ts:1676` | rejects a reordered collateral list when checking the market hash | 4 | Ported: `TestParityMidnight/midnight.test.ts:1676` (1) |
+| `midnight.test.ts:1702` | decodes all multicall legs and rejects a malformed leg | 4 | Ported: `TestParityMidnight/midnight.test.ts:1702` (2) |
+| `midnight.test.ts:1718` | rejects a core collateral withdrawal with invalid $change | 4 | Ported: `TestParityMidnight/midnight.test.ts:1718` (4) |
+| `midnight.test.ts:1890` | verifies native and auto-funded bundle supply with optional prerequisites | 4 | Ported: `TestParityMidnight/midnight.test.ts:1890` (2) |
+| `midnight.test.ts:1945` | still accepts direct core supplyCollateral when funding and expires_at are set | 4 | Ported: `TestParityMidnight/midnight.test.ts:1945` (4) |
+| `midnight.test.ts:1962` | rejects non-empty $label in midnightBundlesV2CancelAndMake | 4 | Ported: `TestParityMidnight/midnight.test.ts:1962` (17) |
+| `midnight.test.ts:2018` | rejects zero deadline, zero value, budget overrun, non-wNative collateral, and unauthorized funding | 4 | Ported: `TestParityMidnight/midnight.test.ts:2018` (11) |
+| `midnight.test.ts:2104` | rejects tampered prerequisites on native supply_collateral | 4 | Ported: `TestParityMidnight/midnight.test.ts:2104` (4) |
 | `midnightOffers.test.ts:87` | verifies %s | 5 | Ported: `TestParityMidnightOffers/midnightOffers.test.ts:87` (6) |
 | `midnightOffers.test.ts:94` | checks the group, market, amount and optional maker against the request | 5 | Ported: `TestParityMidnightOffers/midnightOffers.test.ts:94` (6) |
 | `midnightOffers.test.ts:122` | rejects lowering the encoded min_assets floor on a borrow take | 5 | Ported: `TestParityMidnightOffers/midnightOffers.test.ts:122` (2) |
@@ -175,9 +180,10 @@ See [regeneration instructions](parity-generation.md) when updating the pin.
 | `midnightOffersSdk.test.ts:147` | rejects the collateral take action without collateral supplies | 5 | Ported: `TestParityMidnightOffers/midnightOffersSdk.test.ts:147` (2) |
 | `midnightOffersSdk.test.ts:171` | verifies a paid $intent.action and rejects a changed fee or recipient | 5 | Ported: `TestParityMidnightOffers/midnightOffersSdk.test.ts:171` (6) |
 | `midnightOffersSdk.test.ts:317` | verifies SDK-built $intent.action and rejects modified parameters | 5 | Ported: `TestParityMidnightOffers/midnightOffersSdk.test.ts:317` (44) |
-| `midnightSdk.test.ts:179` | rejects a fill from a different market in an SDK-built Midnight borrow | 4 | Ported: `TestParityMidnight/midnightSdk.test.ts:179` (1) |
-| `midnightSdk.test.ts:234` | rejects reduceOnly=$reduceOnly for $action | 4 | Ported: `TestParityMidnight/midnightSdk.test.ts:234` (2) |
-| `midnightSdk.test.ts:268` | verifies SDK-built $intent.action and rejects modified parameters | 4 | Ported: `TestParityMidnight/midnightSdk.test.ts:268` (69) |
+| `midnightSdk.test.ts:180` | rejects a fill from a different market in an SDK-built Midnight borrow | 4 | Ported: `TestParityMidnight/midnightSdk.test.ts:180` (1) |
+| `midnightSdk.test.ts:235` | rejects reduceOnly=$reduceOnly for $action | 4 | Ported: `TestParityMidnight/midnightSdk.test.ts:235` (2) |
+| `midnightSdk.test.ts:269` | verifies SDK-built $intent.action and rejects modified parameters | 4 | Ported: `TestParityMidnight/midnightSdk.test.ts:269` (69) |
+| `midnightSdk.test.ts:333` | verifies SDK-built native midnight.supply_collateral and rejects modified parameters | 4 | Ported: `TestParityMidnight/midnightSdk.test.ts:333` (12) |
 | `vaultSdk.test.ts:78` | binds %s approvals to the requested asset | 2 | Ported: `TestParityVault/vaultSdk.test.ts:78` (12) |
 | `vaultSdk.test.ts:179` | verifies a vault deposit with an SDK-encoded ERC-2612 permit | 2 | Ported: `TestParityVault/vaultSdk.test.ts:179` (1) |
 | `vaultSdk.test.ts:199` | checks that a %s vault redemption's permit or approval covers the encoded shares | 2 | Ported: `TestParityVault/vaultSdk.test.ts:199` (12) |
