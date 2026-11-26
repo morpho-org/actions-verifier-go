@@ -1,14 +1,44 @@
 package calldataverifier_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
+	"os"
 
 	"github.com/morpho-org/calldata-verifier-go"
 )
 
 func ExampleVerifyCalldata() {
+	// Keep this from the original prepare request, before receiving any calls.
+	body := []byte(`{"account":"0x1000000000000000000000000000000000000001","amount":{"unit":"assets","value":"1000000"},"funding":{"type":"erc20"}}`)
+	request := exampleJSON[depositRequest](body)
+	intent := calldataverifier.VaultCalldataIntent{
+		CommonIntent: calldataverifier.CommonIntent{
+			Action: "vault_v2.deposit", ChainID: 1, Account: request.Account, MaxFeeBPS: 0,
+		},
+		Vault:  "0x2000000000000000000000000000000000000002",
+		Asset:  "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // Independently known underlying.
+		Amount: request.Amount, Funding: request.Funding,
+	}
+	// In an integration these are data.calls from the prepared response, in order.
+	fixture := exampleJSON[struct {
+		Cases map[string]struct {
+			Calls []calldataverifier.CalldataCall
+		}
+	}](exampleFile("vault-vectors.json"))
+	verified, err := calldataverifier.VerifyCalldata(intent, fixture.Cases["v2Deposit"].Calls)
+	if err != nil {
+		fmt.Println(err)
+		return // Do not sign.
+	}
+	for _, call := range verified {
+		fmt.Println(call.Call.ID, call.FunctionName)
+	}
+	// Output: call_0 vaultBundlesV1Deposit
+}
+
+func ExampleVerifyCalldata_typedError() {
 	intent := calldataverifier.VaultCalldataIntent{
 		CommonIntent: calldataverifier.CommonIntent{
 			Action: "vault_v1.deposit", ChainID: 1,
@@ -26,7 +56,11 @@ func ExampleVerifyCalldata() {
 	if _, err := calldataverifier.VerifyCalldata(intent, calls); err != nil {
 		var target *calldataverifier.CalldataTargetError
 		if errors.As(err, &target) {
-			fmt.Println(target.Field, *target.CallID)
+			if target.CallID != nil {
+				fmt.Println(target.Field, *target.CallID)
+			} else {
+				fmt.Println(target.Field)
+			}
 		}
 		return // Do not sign.
 	}
@@ -88,16 +122,91 @@ func ExampleVerifyCalldata_unsupportedOffer() {
 }
 
 func ExampleVerifyCalldata_actionProof() {
-	// Obtain these inputs from the trusted key source and original HTTP exchange.
-	verify := func(intent calldataverifier.CalldataIntent, calls []calldataverifier.CalldataCall,
-		jwks []byte, header string, req calldataverifier.ActionProofRequest, res calldataverifier.ActionProofResponse,
-	) ([]calldataverifier.DecodedCalldataCall, error) {
-		now := float64(time.Now().Unix())
-		return calldataverifier.VerifyCalldata(intent, calls, calldataverifier.VerifyOptions{
-			Proof: &calldataverifier.ActionProofInput{
-				Header: header, JWKS: jwks, Now: &now, Request: req, Response: res,
-			},
-		})
+	// The fixture provides the exact HTTP exchange and a fixed verification time.
+	req, res, header, now := exampleProofExchange()
+	request := exampleJSON[depositRequest](req.Body)
+	intent := calldataverifier.VaultCalldataIntent{
+		CommonIntent: calldataverifier.CommonIntent{
+			Action: "vault_v2.deposit", ChainID: 8453, Account: request.Account, MaxFeeBPS: 0,
+		},
+		Vault:  "0xbeef0e0834849aCC03f0089F01f4F1Eeb06873C9", // Original request target.
+		Asset:  "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // Independently known underlying.
+		Amount: request.Amount, Funding: request.Funding, SlippageBPS: request.SlippageBPS,
 	}
-	_ = verify
+	response := exampleJSON[struct {
+		Data struct {
+			Calls []calldataverifier.CalldataCall
+		}
+	}](res.Body)
+	// Use your independently trusted issuer JWKS and current Unix time in production.
+	jwks := exampleFile("action-proof-jwks.json")
+	verified, err := calldataverifier.VerifyCalldata(intent, response.Data.Calls, calldataverifier.VerifyOptions{
+		Proof: &calldataverifier.ActionProofInput{
+			Header: header, JWKS: jwks, Now: &now, Request: req, Response: res,
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return // Do not sign or retry without proof.
+	}
+	for _, call := range verified {
+		fmt.Println(call.Call.ID, call.FunctionName)
+	}
+	// Output:
+	// call_0 approve
+	// call_1 vaultBundlesV1Deposit
+}
+
+type depositRequest struct {
+	Account     string
+	Amount      calldataverifier.Amount
+	Funding     *calldataverifier.Funding
+	SlippageBPS *int `json:"slippage_bps"`
+}
+
+func exampleFile(name string) []byte {
+	data, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
+func exampleJSON[T any](data []byte) T {
+	var value T
+	if err := json.Unmarshal(data, &value); err != nil {
+		panic(err)
+	}
+	return value
+}
+
+func exampleProofExchange() (calldataverifier.ActionProofRequest, calldataverifier.ActionProofResponse, string, float64) {
+	document := exampleJSON[struct {
+		Vectors []struct {
+			Name    string
+			Now     float64
+			Request struct {
+				Method      string
+				Path        string
+				ContentType string `json:"content_type"`
+				Body        []byte `json:"body_base64"`
+			}
+			Response struct {
+				Status  int
+				Headers map[string]string
+				Body    []byte `json:"body_base64"`
+			}
+		} `json:"proof_vectors"`
+	}](exampleFile("action-proof-vectors.json"))
+	for _, v := range document.Vectors {
+		if v.Name == "approved_prepared_success" {
+			return calldataverifier.ActionProofRequest{
+					Method: v.Request.Method, Path: v.Request.Path, ContentType: v.Request.ContentType, Body: v.Request.Body,
+				}, calldataverifier.ActionProofResponse{
+					Status: v.Response.Status, ContentType: v.Response.Headers["content-type"],
+					RequestID: v.Response.Headers["x-request-id"], Body: v.Response.Body,
+				}, v.Response.Headers["morpho-action-proof"], v.Now
+		}
+	}
+	panic("missing successful action proof fixture")
 }
