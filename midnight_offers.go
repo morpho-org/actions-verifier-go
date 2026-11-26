@@ -2,6 +2,7 @@ package calldataverifier
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"math/big"
 	"strings"
 
@@ -17,13 +18,34 @@ type MidnightTakeIntent struct {
 	MarketID           *string                      `json:"market_id,omitempty"`
 	Maker              *string                      `json:"maker,omitempty"`
 	Amount             Amount                       `json:"amount"`
-	Guard              *MidnightGuard               `json:"guard"`
+	Guard              *MidnightGuard               `json:"guard,omitempty"`
 	ReferralFee        *ReferralFee                 `json:"referral_fee,omitempty"`
 	Funding            *Funding                     `json:"funding,omitempty"`
 	CollateralSupplies []MidnightCollateralTransfer `json:"collateral_supplies,omitempty"`
+	nullGuard          bool
 }
 
 func (i MidnightTakeIntent) calldataIntent() CommonIntent { return i.CommonIntent }
+
+// UnmarshalJSON preserves the distinction between omitted and null guards.
+func (i *MidnightTakeIntent) UnmarshalJSON(data []byte) error {
+	type fields MidnightTakeIntent
+	var decoded struct {
+		fields
+		Guard json.RawMessage `json:"guard"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if len(decoded.Guard) != 0 {
+		if err := json.Unmarshal(decoded.Guard, &decoded.fields.Guard); err != nil {
+			return err
+		}
+		decoded.fields.nullGuard = string(decoded.Guard) == "null"
+	}
+	*i = MidnightTakeIntent(decoded.fields)
+	return nil
+}
 
 // MidnightOfferManagementIntent describes cancellations, funding withdrawals,
 // and unsupported make-offer actions.
@@ -72,7 +94,7 @@ func verifyMidnightTake(intent MidnightTakeIntent, calls []CalldataCall, chain D
 		return nil, unknownMidnightAction(calls)
 	}
 	return verifyMidnightCalls(MidnightMarketIntent{
-		CommonIntent: intent.CommonIntent, Amount: intent.Amount, Guard: intent.Guard,
+		CommonIntent: intent.CommonIntent, Amount: intent.Amount, Guard: intent.Guard, nullGuard: intent.nullGuard,
 		ReferralFee: intent.ReferralFee, Funding: intent.Funding, CollateralSupplies: intent.CollateralSupplies,
 	}, &intent, calls, chain)
 }

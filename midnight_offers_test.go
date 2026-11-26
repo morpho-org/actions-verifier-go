@@ -1,12 +1,71 @@
 package calldataverifier
 
 import (
+	"encoding/json"
 	"math/big"
 	"reflect"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 )
+
+func TestMidnightTakeJSONGuard(t *testing.T) {
+	vector := loadVectors[MidnightTakeIntent](t, "midnight-offers-vectors.json")["exactAssets"]
+	bin, err := json.Marshal(vector.Intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(bin, &fields); err != nil {
+		t.Fatal(err)
+	}
+	last := vector.Calls[len(vector.Calls)-1]
+	var intent MidnightTakeIntent
+	fields["guard"] = json.RawMessage("null")
+	bin, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(bin, &intent); err != nil {
+		t.Fatal(err)
+	}
+	_, err = VerifyCalldata(intent, vector.Calls)
+	requireError[*CalldataUnsupportedError](t, err, "guard.type", &last.ID)
+
+	delete(fields, "guard")
+	bin, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(bin, &intent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyCalldata(intent, vector.Calls); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMidnightTakeLendContinuousFeeParity(t *testing.T) {
+	vector := loadVectors[MidnightTakeIntent](t, "midnight-offers-vectors.json")["lend"]
+	for _, cap := range []*big.Int{new(big.Int), new(big.Int).Set(maxUint256)} {
+		calls := append([]CalldataCall(nil), vector.Calls...)
+		last := len(calls) - 1
+		calls[last] = changeArgs(t, "midnightBundle", calls[last], func(args []any) { args[10] = cap })
+		if _, err := VerifyCalldata(vector.Intent, calls); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestMidnightWithdrawFundingShareParity(t *testing.T) {
+	vector := loadVectors[MidnightOfferManagementIntent](t, "midnight-offers-vectors.json")["withdrawFunding"]
+	for _, shares := range []int64{1, 200} {
+		call := changeArgs(t, "blue", vector.Calls[0], func(args []any) { args[2] = big.NewInt(shares) })
+		if _, err := VerifyCalldata(vector.Intent, []CalldataCall{call}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 // midnightOffers.test.ts: verifies each prepared offer case.
 func TestMidnightOfferVectors(t *testing.T) {
