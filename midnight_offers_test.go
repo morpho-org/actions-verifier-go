@@ -9,6 +9,21 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+func TestParityMidnightOffers(t *testing.T) {
+	runParity(t, "offers", func(raw []byte) (CalldataIntent, error) {
+		var req CommonIntent
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, err
+		}
+		switch req.Action {
+		case "midnight.take_lend", "midnight.take_borrow", "midnight.supply_collateral_take_borrow":
+			return parityIntent[MidnightTakeIntent](raw)
+		default:
+			return parityIntent[MidnightOfferManagementIntent](raw)
+		}
+	}, nil)
+}
+
 func TestMidnightTakeJSONGuard(t *testing.T) {
 	vector := loadVectors[MidnightTakeIntent](t, "midnight-offers-vectors.json")["exactAssets"]
 	bin, err := json.Marshal(vector.Intent)
