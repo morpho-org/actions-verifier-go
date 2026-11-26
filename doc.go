@@ -6,13 +6,14 @@
 // funding, and fee limits independently of the response.
 // Invoke the verified calls only from the intended account and chain.
 // Midnight make-offer actions are unsupported.
-// With VerifyOptions.Proof, VerifyCalldata authenticates the exact request,
-// response, and ordered calls before static validation, using caller-supplied
-// trusted JWKS and time.
+// With VerifyOptions.Proof, VerifyCalldata verifies the Actions API's ES256
+// proof signature and authenticates the exact request, response, and ordered
+// calls before static validation, using caller-supplied trusted JWKS and time.
 //
-// A successful check is not a simulation, state check, or signature verification.
-// Verify state-dependent price, deadline and penalty limits and simulate
-// independently before signing. See the [README] for the verification boundary.
+// A successful check is not a simulation or state check. Permit and
+// authorization signatures embedded in calldata are not cryptographically
+// verified. Verify state-dependent price, deadline and penalty limits and
+// simulate independently before signing. See the [README] for the verification boundary.
 //
 // [README]: https://github.com/morpho-org/calldata-verifier-go#what-a-result-means
 package calldataverifier

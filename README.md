@@ -115,8 +115,10 @@ addresses. Use `errors.As` with the typed errors (for example,
 `*CalldataTargetError`) and inspect `Field` and the optional `CallID`.
 
 A successful check does not establish execution safety, prove current position
-sizes or allowances, read a vault's underlying token, or verify permit signatures.
-Without a proof input, it does not authenticate the API response. The verifier does not enforce
+sizes or allowances, or read a vault's underlying token. Permit and
+authorization signatures embedded in calldata are not cryptographically
+verified. Without a proof input, the verifier does not authenticate the API
+response. The verifier does not enforce
 `slippage_bps`, `max_penalty_bps`, or request deadlines. Independently verify
 state-derived price limits, deadlines, deallocation and penalty bounds, and
 simulate before signing. Approvals can persist beyond the action.
@@ -145,8 +147,9 @@ simulate before signing. Approvals can persist beyond the action.
 
 ### Authenticate an Actions API response
 
-Pass `VerifyOptions{Proof: &proof}` to authenticate the response before the
-same static checks. Populate `ActionProofInput` with the `Morpho-Action-Proof`
+Pass `VerifyOptions{Proof: &proof}` to verify the Actions API's ES256 proof
+signature and authenticate the response before the same static checks.
+Populate `ActionProofInput` with the `Morpho-Action-Proof`
 header, independently trusted issuer JWKS JSON, the current Unix time in
 seconds, and the exact HTTP exchange. The issuer defaults to
 `https://api.morpho.org/v0/actions`.
