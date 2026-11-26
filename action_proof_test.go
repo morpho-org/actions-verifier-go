@@ -12,6 +12,19 @@ import (
 	"testing"
 )
 
+func TestParityProof(t *testing.T) {
+	runParity(t, "proof", parityIntent[VaultCalldataIntent], func(intent CalldataIntent, calls []CalldataCall, raw json.RawMessage) ([]DecodedCalldataCall, error) {
+		if len(raw) == 0 {
+			return VerifyCalldata(intent, calls)
+		}
+		var proof ActionProofInput
+		if err := json.Unmarshal(raw, &proof); err != nil {
+			return nil, err
+		}
+		return VerifyCalldata(intent, calls, VerifyOptions{Proof: &proof})
+	})
+}
+
 type proofVector struct {
 	Name    string
 	Now     float64
