@@ -1,4 +1,4 @@
-package verifier
+package calldataverifier
 
 import (
 	"math/big"

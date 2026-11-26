@@ -1,4 +1,4 @@
-// Package verifier checks ordered Morpho Actions API wallet calls against the
+// Package calldataverifier checks ordered Morpho Actions API wallet calls against the
 // original endpoint intent without network access or execution.
 //
 // A true result is structural acceptance, not a simulation or a check of
@@ -13,5 +13,5 @@
 // that the response chose the intended token. See the [README] for route-specific
 // guarantees and limitations.
 //
-// [README]: https://github.com/morpho-org/actions-verifier-go#what-a-result-means
-package verifier
+// [README]: https://github.com/morpho-org/calldata-verifier-go#what-a-result-means
+package calldataverifier

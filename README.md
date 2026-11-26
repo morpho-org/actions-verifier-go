@@ -10,7 +10,7 @@ submit transactions.
 Use Go 1.25.1 or newer. Until there is a release tag, install from `dev`:
 
 ```sh
-go get github.com/morpho-org/actions-verifier-go@dev
+go get github.com/morpho-org/calldata-verifier-go@dev
 ```
 
 Import it as package `verifier`.
@@ -50,20 +50,20 @@ package integration
 import (
     "encoding/json"
 
-    "github.com/morpho-org/actions-verifier-go"
+    "github.com/morpho-org/calldata-verifier-go"
 )
 
 func matchesPreparedCalls(path string, requestBody, responseBody []byte) bool {
     var response struct {
         Data struct {
             Status string          `json:"status"`
-            Calls  []verifier.Call `json:"calls"`
+            Calls  []calldataverifier.Call `json:"calls"`
         } `json:"data"`
     }
     if json.Unmarshal(responseBody, &response) != nil || response.Data.Status != "prepared" {
         return false
     }
-    return verifier.Verify(verifier.Intent{Path: path, Body: requestBody}, response.Data.Calls)
+    return calldataverifier.Verify(calldataverifier.Intent{Path: path, Body: requestBody}, response.Data.Calls)
 }
 ```
 

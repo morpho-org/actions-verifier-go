@@ -1,37 +1,37 @@
-package verifier_test
+package calldataverifier_test
 
 import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/morpho-org/actions-verifier-go"
+	"github.com/morpho-org/calldata-verifier-go"
 )
 
 func ExampleVerify() {
-	intent := verifier.Intent{
+	intent := calldataverifier.Intent{
 		Path: "/v0/actions/vaults-v1/1:0x0000000000000000000000000000000000000010/deposit",
 		Body: json.RawMessage(`{"account":"0x0000000000000000000000000000000000000001","amount":{"unit":"assets","value":"1000"},"funding":{"type":"erc20"}}`),
 	}
 	var response struct {
 		Data struct {
-			Calls []verifier.Call `json:"calls"`
+			Calls []calldataverifier.Call `json:"calls"`
 		} `json:"data"`
 	}
 	// A response without prepared calls must not be sent.
 	if err := json.Unmarshal([]byte(`{"data":{"calls":[]}}`), &response); err != nil {
 		panic(err)
 	}
-	fmt.Println(verifier.Verify(intent, response.Data.Calls))
+	fmt.Println(calldataverifier.Verify(intent, response.Data.Calls))
 	// Output: false
 }
 
 func ExampleVerify_prepared() {
-	intent := verifier.Intent{
+	intent := calldataverifier.Intent{
 		Path: "/v0/actions/vaults-v1/1:0x0000000000000000000000000000000000000002/deposit",
 		Body: json.RawMessage(`{"account":"0x0000000000000000000000000000000000000001","expires_at":4000000000,"amount":{"unit":"assets","value":"1000"},"funding":{"type":"erc20"}}`),
 	}
 	status := "prepared"
-	calls := []verifier.Call{{
+	calls := []calldataverifier.Call{{
 		ID:   "call_0",
 		Kind: "vault_v1_deposit",
 		To:   "0x02912516d49dE997db75B9D7858faAE59209650B",
@@ -48,6 +48,6 @@ func ExampleVerify_prepared() {
 			"0000000000000000000000000000000000000000000000000000000000000000",
 		Value: "0",
 	}}
-	fmt.Println(status == "prepared" && verifier.Verify(intent, calls))
+	fmt.Println(status == "prepared" && calldataverifier.Verify(intent, calls))
 	// Output: true
 }
