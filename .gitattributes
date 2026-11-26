@@ -1,0 +1,2 @@
+/testdata/*.json -text
+/testdata/action-proof-revision.txt -text
