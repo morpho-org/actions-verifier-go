@@ -9,19 +9,28 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+func midnightOfferParityIntent(raw []byte) (CalldataIntent, error) {
+	var req CommonIntent
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, err
+	}
+	switch req.Action {
+	case "midnight.take_lend", "midnight.take_borrow", "midnight.supply_collateral_take_borrow":
+		return parityIntent[MidnightTakeIntent](raw)
+	default:
+		return parityIntent[MidnightOfferManagementIntent](raw)
+	}
+}
+
 func TestParityMidnightOffers(t *testing.T) {
-	runParity(t, "offers", func(raw []byte) (CalldataIntent, error) {
-		var req CommonIntent
-		if err := json.Unmarshal(raw, &req); err != nil {
-			return nil, err
-		}
-		switch req.Action {
-		case "midnight.take_lend", "midnight.take_borrow", "midnight.supply_collateral_take_borrow":
-			return parityIntent[MidnightTakeIntent](raw)
-		default:
-			return parityIntent[MidnightOfferManagementIntent](raw)
-		}
-	}, nil)
+	sdk := "sdk"
+	runParityFixture(t, "testdata/ts-parity-offers.json", vectorRevision, map[string]parityError{
+		// 0.2.0 rejects every make-offer action as unsupported. The make-offer rule
+		// (sdks-internal#1288 at makerParityRevision) checks these SDK-built
+		// publications and rejects them because their offers' group is not the
+		// group derived from their leaves.
+		"midnightOffers.test.ts:502": {Type: "CalldataCallError", Field: "offers.group", CallID: &sdk},
+	}, midnightOfferParityIntent, nil)
 }
 
 func TestMidnightTakeJSONGuard(t *testing.T) {
@@ -186,6 +195,6 @@ func TestMidnightOfferManagement(t *testing.T) {
 		intent = vector.Intent
 		intent.Action = action
 		_, err := VerifyCalldata(intent, vector.Calls)
-		requireError[*CalldataUnsupportedError](t, err, action, &call.ID)
+		requireError[*CalldataTargetError](t, err, "to", &call.ID)
 	}
 }

@@ -37,6 +37,8 @@ const deployments = Object.fromEntries(
       blueBundlesV1: address.bundles?.blueBundlesV1,
       midnight: address.midnight,
       midnightBundlesV2: address.midnightBundlesV2,
+      priceRatifierV1: address.priceRatifierV1,
+      rateRatifierV1: address.rateRatifierV1,
     }];
   }),
 );

@@ -105,8 +105,9 @@ type midnightTransfer struct {
 }
 
 type midnightPull struct {
-	token  common.Address
-	assets *big.Int
+	token   common.Address
+	assets  *big.Int
+	spender string
 }
 
 type midnightContext struct {
@@ -283,7 +284,7 @@ func (c midnightContext) collateral(transfers []midnightTransfer, requested []Mi
 				return nil, err
 			}
 		}
-		pulls = append(pulls, midnightPull{token, transfer.Assets})
+		pulls = append(pulls, midnightPull{token: token, assets: transfer.Assets})
 	}
 	return pulls, nil
 }
@@ -326,7 +327,11 @@ func (c midnightContext) prerequisites(calls []CalldataCall, pulls []midnightPul
 		}
 		token := pull.token.Hex()
 		reset := i+1 < len(calls) && sameAddress(calls[i+1].To, token)
-		decoded, err := checkApproval(call, c.call.To, token, pull.assets, reset)
+		spender := pull.spender
+		if spender == "" {
+			spender = c.call.To
+		}
+		decoded, err := checkApproval(call, spender, token, pull.assets, reset)
 		if err != nil {
 			return nil, err
 		}
@@ -594,7 +599,7 @@ func (c midnightContext) buy(args []any, unit string) ([]midnightPull, error) {
 	if maxAssets.Sign() == 0 {
 		return nil, nil
 	}
-	return []midnightPull{{market.LoanToken, maxAssets}}, nil
+	return []midnightPull{{token: market.LoanToken, assets: maxAssets}}, nil
 }
 
 func (c midnightContext) sell(args []any, unit string) ([]midnightPull, error) {

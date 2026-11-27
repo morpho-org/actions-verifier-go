@@ -12,7 +12,7 @@ import (
 
 func TestDocumentedChainSupport(t *testing.T) {
 	deployments := defaultSnapshot.Deployments
-	type roles [8]bool
+	type roles [9]bool
 	groups := make(map[roles][]string)
 	var order []roles
 	for _, id := range slices.Sorted(maps.Keys(deployments)) {
@@ -24,6 +24,7 @@ func TestDocumentedChainSupport(t *testing.T) {
 			d.BlueBundlesV1 != "",
 			d.Midnight != "" && d.MidnightBundlesV2 != "",
 			d.Midnight != "" && d.MidnightBundlesV2 != "" && d.WNative != "",
+			d.Midnight != "" && d.MidnightBundlesV2 != "" && d.PriceRatifierV1 != "" && d.RateRatifierV1 != "",
 			d.Midnight != "",
 			d.Blue != "",
 		}
@@ -33,8 +34,8 @@ func TestDocumentedChainSupport(t *testing.T) {
 		groups[row] = append(groups[row], strconv.FormatUint(id, 10))
 	}
 	var expected strings.Builder
-	expected.WriteString("| Chain IDs | Vault deposits and withdrawals | Vault native deposits | Vault bundled exits | Blue bundle actions | Midnight bundles | Midnight native collateral supply | Midnight core calls and cancellation | Midnight funding withdrawal |\n")
-	expected.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
+	expected.WriteString("| Chain IDs | Vault deposits and withdrawals | Vault native deposits | Vault bundled exits | Blue bundle actions | Midnight bundles | Midnight native collateral supply | Midnight maker offers | Midnight core calls and cancellation | Midnight funding withdrawal |\n")
+	expected.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, row := range order {
 		fmt.Fprintf(&expected, "| %s |", strings.Join(groups[row], ", "))
 		for _, supported := range row {

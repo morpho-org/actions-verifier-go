@@ -45,12 +45,12 @@ coverage, not whether the API can prepare a particular action or whether it
 will succeed on-chain.
 
 <!-- chain-support:start -->
-| Chain IDs | Vault deposits and withdrawals | Vault native deposits | Vault bundled exits | Blue bundle actions | Midnight bundles | Midnight native collateral supply | Midnight core calls and cancellation | Midnight funding withdrawal |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1, 10, 130, 137, 143, 480, 4663, 8453, 42161, 747474 | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| 14, 25, 50, 56, 146, 239, 252, 714, 1135, 1329, 1672, 1868, 2741, 2818, 4326, 8217, 16661, 34443, 42220, 42793, 43111, 57073, 59144, 98866, 200901, 534352, 685689, 21000000, 123420001114 | — | — | — | — | — | — | — | Yes |
-| 196, 999 | Yes | Yes | Yes | Yes | — | — | — | Yes |
-| 988, 4217, 5042, 29032 | Yes | — | Yes | Yes | Yes | — | Yes | Yes |
+| Chain IDs | Vault deposits and withdrawals | Vault native deposits | Vault bundled exits | Blue bundle actions | Midnight bundles | Midnight native collateral supply | Midnight maker offers | Midnight core calls and cancellation | Midnight funding withdrawal |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1, 10, 130, 137, 143, 480, 4663, 8453, 42161, 747474 | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| 14, 25, 50, 56, 146, 239, 252, 714, 1135, 1329, 1672, 1868, 2741, 2818, 4326, 8217, 16661, 34443, 42220, 42793, 43111, 57073, 59144, 98866, 200901, 534352, 685689, 21000000, 123420001114 | — | — | — | — | — | — | — | — | Yes |
+| 196, 999 | Yes | Yes | Yes | Yes | — | — | — | — | Yes |
+| 988, 4217, 5042, 29032 | Yes | — | Yes | Yes | Yes | — | Yes | Yes | Yes |
 <!-- chain-support:end -->
 
 Vault deposits with nonzero native value require a wrapped native token
@@ -58,7 +58,8 @@ Vault deposits with nonzero native value require a wrapped native token
 Vault bundled exits are exact-asset force withdrawals and in-kind redemptions.
 An `all` force withdrawal goes directly to the trusted Vault V2 address and
 does not require a bundle deployment. Midnight funding withdrawals go directly
-to Blue and do not require a Midnight deployment. A dash means that the
+to Blue and do not require a Midnight deployment. Maker offers also require
+the chain's `PriceRatifierV1` and `RateRatifierV1`. A dash means that the
 required role is not in the default registry.
 
 ### Supported Vault actions
@@ -134,9 +135,37 @@ external checks or simulation.
   `midnight.withdraw_funding`. A cancellation must consume the requested groups
   in full. Funding withdrawals must be share-based Blue withdrawals from the
   requested owner and market to the intended account.
-- `midnight.make_borrow`, `midnight.make_lend`, `midnight.make_repay`, and
-  `midnight.make_withdraw` return `CalldataUnsupportedError`. The verifier
-  does not interpret their compressed offer payloads.
+- Use `MidnightOfferManagementIntent` with `Offers` for `midnight.make_lend`,
+  `midnight.make_borrow`, `midnight.make_repay`, and `midnight.make_withdraw`.
+  The call must be `MidnightBundlesV2.midnightBundlesV2CancelAndMake` with the
+  chain's `PriceRatifierV1` or `RateRatifierV1` for `Offers.Type`, no delegated
+  root signature, no cancellations, no Blue parking, and a nonzero deadline.
+  The verifier decompresses the offer payload, rebuilds the offer tree from it,
+  and requires its root to equal the root the call activates, so the payload is
+  exactly the set of activated offers. A payload with a trailing attribution
+  suffix is rejected.
+- Each offer must match the request entry at the same index: `Account` as
+  maker, the entry's `MarketID` on the intended chain and Midnight deployment,
+  `StartsAt` and `ExpiresAt`, the entry's `Tick` when given (always for price
+  offers), and for rate offers a ratified rate equal to `RateWAD`. Lend and
+  repay offers buy; borrow and withdraw offers sell and pay `Account`. Lend and
+  borrow cap assets at `Amount` (unit `"assets"`); repay and withdraw are
+  reduce-only and cap units at `Amount` (unit `"units"`). Offers carry no
+  callback, taker restriction, or continuous-fee cap, and share the group
+  derived from their leaves.
+- Lend and repay may approve the offers' loan token to Midnight, at least
+  `Amount` for lend, and every make action may authorize the bundle. A
+  `midnight.make_borrow` with `CollateralSupplies` must supply exactly that
+  collateral on the offers' market, with native value up to the wrapped-native
+  collateral amount and `Funding.MaxNativeAssets`; without it, the call must
+  encode no collateral and no value.
+- `midnight.make_lend` with a `FundingSource.Type` other than `"wallet"`
+  (a variable rate market) returns `CalldataUnsupportedError`: its offers name
+  the maker's Blue buy callback, whose address the verifier cannot derive.
+- The verifier does not check whether offer markets exist, their tick
+  spacing, whether the published group is already consumed or cancelled, or
+  existing allowances. Midnight checks these at execution or when offers are
+  taken.
 
 The default registry and ABIs are embedded from the pinned
 `@morpho-org/calldata-verifier@0.2.0` reference. For additional trusted deployments,
@@ -172,7 +201,7 @@ to a call. Do not sign when any error is returned.
   `Funding.Type: "native"` does not require a nonzero transaction `Value`.
   Nonzero value is checked against the funding budget and the deposit; if your
   policy requires payment in native currency, check the value separately.
-- Midnight `make_*` actions are unsupported; see
+- `midnight.make_lend` funded from a variable rate market is unsupported; see
   [Midnight offer actions](#supported-midnight-offer-actions).
 
 A successful check does not establish execution safety, prove current position
@@ -241,6 +270,15 @@ proof-free path if your application requires proof.
   TypeScript ignores or accepts, and malformed JSON can produce a decoding
   error before the verifier runs. Include `"max_fee_bps": 0` explicitly for a
   zero fee cap in JSON; a prefilled Go zero is indistinguishable from an unset cap.
+- Make-offer verification ports the rule in
+  [sdks-internal#1288](https://github.com/morpho-org/sdks-internal/pull/1288),
+  which no published TypeScript version includes yet. TypeScript 0.2.0 returns
+  `CalldataUnsupportedError` for every `midnight.make_*` action.
+- Go decompresses make-offer payloads with `compress/gzip`, which rejects a
+  gzip stream with a wrong checksum or size trailer, a truncated trailer, or
+  trailing bytes after the last member. The TypeScript draft's decompressor
+  does not check these. The offers checked are the same either way, because
+  the rebuilt tree must equal the activated root.
 - Go's JSON decoder replaces unpaired UTF-16 surrogate escapes with U+FFFD;
   JavaScript preserves those code units. If interoperating between the two,
   use only well-formed Unicode strings in JSON, including in proof claims and

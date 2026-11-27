@@ -49,3 +49,23 @@ tarball in the lockfile and extracts it without running package code. The
 replay runs with no Node.js network permission.
 Byte-for-byte regeneration requires access to the pinned source checkout, so
 run the companion command with `--check` before publishing a fixture update.
+
+## Pending make-offer parity
+
+The pinned verifier rejects every `midnight.make_*` action, so its suite has
+no make-offer cases. Until the make-offer rule from sdks-internal#1288 is
+released and the pin above moves past it, `generate-maker-parity.py` captures
+that draft's `midnightMakers.test.ts` at the revision in the script into
+`testdata/pending-parity-makers.json`, with the same capture plugin. Run it on
+a clean checkout of that revision with its lockfile dependencies installed:
+
+```sh
+python3 generate-maker-parity.py /path/to/sdk-checkout-at-maker-revision --check
+```
+
+`TestParityMidnightMakers` replays the fixture, and `TestMakerParityPin` keeps
+the script and `makerParityRevision` in step. The npm replay does not cover
+it, because no published version accepts make-offer actions. When the pin
+moves past the released rule, add `midnightMakers` to `generate-parity.py`,
+drop the pending fixture and script, and remove the
+`midnightOffers.test.ts:502` override in `TestParityMidnightOffers`.

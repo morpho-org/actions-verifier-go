@@ -112,13 +112,19 @@ func ExampleVerifyCalldata_unsupportedOffer() {
 			Action: "midnight.make_lend", ChainID: 8453,
 			Account: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
 		},
+		// Lending from a variable rate market needs a callback the verifier cannot derive.
+		FundingSource: &calldataverifier.MidnightFundingSource{Type: "variable_rate_market"},
 	}
-	_, err := calldataverifier.VerifyCalldata(intent, []calldataverifier.CalldataCall{})
+	calls := []calldataverifier.CalldataCall{{
+		ID: "make", Kind: "midnightCancelAndMake", Value: "0",
+		To: "0x78edB268D228529715744211E11A5d50fd2BDbA4",
+	}}
+	_, err := calldataverifier.VerifyCalldata(intent, calls)
 	var unsupported *calldataverifier.CalldataUnsupportedError
 	if errors.As(err, &unsupported) {
 		fmt.Println(unsupported.Field)
 	}
-	// Output: midnight.make_lend
+	// Output: funding_source
 }
 
 func ExampleVerifyCalldata_actionProof() {

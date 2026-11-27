@@ -10,7 +10,9 @@
   the direct core route. The registry includes Midnight deployments on eight
   additional chains.
 - Known limits: Vault native funding checks a budget but does not require a
-  nonzero value. Midnight `make_*` actions are unsupported. Static
+  nonzero value. Midnight `make_*` actions are verified against their offer
+  payload and activated root, porting sdks-internal#1288 ahead of its TypeScript
+  release; `make_lend` funded from a variable rate market is unsupported. Static
   verification is not a simulation or a check of current chain state. See
   [known limitations](README.md#known-limitations).
 

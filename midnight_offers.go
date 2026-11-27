@@ -40,7 +40,7 @@ func (i *MidnightTakeIntent) UnmarshalJSON(data []byte) error {
 }
 
 // MidnightOfferManagementIntent describes cancellations, funding withdrawals,
-// and unsupported make-offer actions.
+// and make-offer actions.
 type MidnightOfferManagementIntent struct {
 	CommonIntent
 	ExpiresAt          *uint64                      `json:"expires_at,omitempty"`
@@ -65,7 +65,7 @@ func (i *MidnightOfferManagementIntent) UnmarshalJSON(data []byte) error {
 	return err
 }
 
-// MidnightMakerOffers describes price or rate entries for an unsupported make-offer action.
+// MidnightMakerOffers describes the price or rate offers of a make-offer action, in published order.
 type MidnightMakerOffers struct {
 	Type    string                    `json:"type"`
 	Entries []MidnightMakerOfferEntry `json:"entries"`
@@ -109,11 +109,7 @@ func validGroup(group string) bool {
 func verifyMidnightOffer(intent MidnightOfferManagementIntent, calls []CalldataCall, chain Deployment) ([]DecodedCalldataCall, error) {
 	switch intent.Action {
 	case "midnight.make_borrow", "midnight.make_lend", "midnight.make_repay", "midnight.make_withdraw":
-		var first *CalldataCall
-		if len(calls) > 0 {
-			first = &calls[0]
-		}
-		return nil, &CalldataUnsupportedError{detail(intent.Action, first, nil)}
+		return verifyMidnightMake(intent, calls, chain)
 	case "midnight.cancel_offers", "midnight.withdraw_funding":
 	default:
 		return nil, unknownMidnightAction(calls)

@@ -131,7 +131,14 @@ func TestParityFixturePins(t *testing.T) {
 
 func runParity(t *testing.T, family string, intent func([]byte) (CalldataIntent, error), verify func(CalldataIntent, []CalldataCall, json.RawMessage) ([]DecodedCalldataCall, error)) {
 	t.Helper()
-	data, err := os.ReadFile("testdata/ts-parity-" + family + ".json")
+	runParityFixture(t, "testdata/ts-parity-"+family+".json", vectorRevision, nil, intent, verify)
+}
+
+// runParityFixture replays a captured fixture. overrides replaces the expected
+// error of every case captured from a TypeScript declaration ("file.test.ts:line").
+func runParityFixture(t *testing.T, path, revision string, overrides map[string]parityError, intent func([]byte) (CalldataIntent, error), verify func(CalldataIntent, []CalldataCall, json.RawMessage) ([]DecodedCalldataCall, error)) {
+	t.Helper()
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +150,7 @@ func runParity(t *testing.T, family string, intent func([]byte) (CalldataIntent,
 	if err := json.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.Revision != vectorRevision || len(fixture.Cases) == 0 {
+	if fixture.Revision != revision || len(fixture.Cases) == 0 {
 		t.Fatal("invalid parity fixture provenance or empty cases")
 	}
 	for _, rawCase := range fixture.Cases {
@@ -157,6 +164,10 @@ func runParity(t *testing.T, family string, intent func([]byte) (CalldataIntent,
 		var vector parityVector
 		if err := json.Unmarshal(expanded, &vector); err != nil {
 			t.Fatal(err)
+		}
+		declaration, _, _ := strings.Cut(vector.Name, "/")
+		if want, ok := overrides[declaration]; ok {
+			vector.Error, vector.Decoded = &want, nil
 		}
 		t.Run(vector.Name, func(t *testing.T) {
 			request, err := intent(vector.Intent)
