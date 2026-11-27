@@ -1,0 +1,21 @@
+[
+  {"name":"null Blue referral fee","family":"blue","base":"supply_allowanceSufficient","set":{"referral_fee":null},"error":{"type":"CalldataFeeError","field":"referral_fee.bps","callID":"call_0"}},
+  {"name":"null Midnight referral fee","family":"midnight","base":"lend_exactAssets","set":{"referral_fee":null},"error":{"type":"CalldataFeeError","field":"referral_fee.bps","callID":"call_2"}},
+  {"name":"missing referral bps","family":"midnight","base":"lend_exactAssets","set":{"referral_fee":{"recipient":"0x1000000000000000000000000000000000000001"}},"error":{"type":"CalldataFeeError","field":"referral_fee.bps","callID":"call_2"}},
+  {"name":"null referral bps","family":"midnight-offers","base":"lend","set":{"referral_fee":{"bps":null}},"error":{"type":"CalldataFeeError","field":"referral_fee.bps","callID":"call_0"}},
+  {"name":"explicit zero referral bps","family":"midnight","base":"lend_exactAssets","set":{"referral_fee":{"bps":0}}},
+  {"name":"mixed-case referral bps","family":"midnight","base":"lend_exactAssets","set":{"referral_fee":{"BPS":0}},"error":{"type":"CalldataFeeError","field":"referral_fee.bps","callID":"call_2"}},
+  {"name":"null collateral amount","family":"blue","base":"borrow_exactAssets","set":{"collateral_amount":null},"error":{"type":"CalldataAmountError","field":"collateral_amount.unit","callID":"call_1"}},
+  {"name":"refinance fee on amount all","family":"blue","base":"refinance_referralFee","set":{"amount":{"unit":"all"}},"error":{"type":"CalldataRecipientError","field":"referral_fee.recipient","callID":"call_1"}},
+  {"name":"mixed-case market only","family":"midnight","base":"lend_exactAssets","rename":{"market":"Market"},"error":{"type":"CalldataTargetError","field":"market","callID":"call_2"}},
+  {"name":"mixed-case group only","family":"midnight-offers","base":"lend","rename":{"group":"GROUP"},"error":{"type":"CalldataTargetError","field":"group","callID":"call_0"}},
+  {"name":"mixed-case market_id only","family":"midnight-offers","base":"lend","rename":{"market_id":"Market_Id"},"error":{"type":"CalldataUnsupportedError","field":"market_id","callID":"call_0"}},
+  {"name":"mixed-case groups only","family":"midnight-offers","base":"batchCancellation","rename":{"groups":"Groups"},"error":{"type":"CalldataTargetError","field":"groups","callID":"call_0"}},
+  {"name":"mixed-case Blue market cannot override exact market","family":"blue","base":"borrow_exactAssets","rename":{"market":"Market"},"set":{"market":"0x0000000000000000000000000000000000000000000000000000000000000000"},"error":{"type":"CalldataTargetError","field":"market","callID":"call_1"}},
+  {"name":"mixed-case guard ignored","family":"midnight","base":"lend_exactAssets","set":{"GUARD":{"type":"bad"}}},
+  {"name":"mixed-case vault asset ignored","family":"vault","base":"v2Deposit","set":{"ASSET":"not an address"}},
+  {"name":"foreign null vault","family":"blue","base":"borrow_exactAssets","set":{"vault":null},"error":{"type":"CalldataTargetError","field":"vault","callID":"call_0"}},
+  {"name":"foreign malformed vault","family":"blue","base":"borrow_exactAssets","set":{"vault":"nope"},"error":{"type":"CalldataTargetError","field":"vault","callID":"call_0"}},
+  {"name":"foreign zero vault","family":"blue","base":"borrow_exactAssets","set":{"vault":"0x0000000000000000000000000000000000000000"},"error":{"type":"CalldataTargetError","field":"vault","callID":"call_0"}},
+  {"name":"foreign valid vault","family":"blue","base":"borrow_exactAssets","set":{"vault":"0x2000000000000000000000000000000000000002"}}
+]

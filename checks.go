@@ -63,7 +63,7 @@ func checkFee(fee *big.Int, to common.Address, max int, referral *ReferralFee, c
 	if fee.Cmp(wad) >= 0 || fee.Cmp(capFor(max)) > 0 {
 		return &CalldataFeeError{detail("max_fee_bps", &call, nil)}
 	}
-	if referral != nil && (referral.BPS < 0 || referral.BPS > 10_000 || fee.Cmp(capFor(referral.BPS)) > 0) {
+	if referral != nil && (referral.missingBPS || referral.BPS < 0 || referral.BPS > 10_000 || fee.Cmp(capFor(referral.BPS)) > 0) {
 		return &CalldataFeeError{detail("referral_fee.bps", &call, nil)}
 	}
 	if fee.Sign() > 0 && (referral == nil || !sameAddress(to.Hex(), referral.Recipient)) {

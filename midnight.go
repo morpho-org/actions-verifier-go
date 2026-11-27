@@ -2,7 +2,6 @@ package calldataverifier
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -76,20 +75,13 @@ func (i MidnightMarketIntent) calldataIntent() CommonIntent { return i.CommonInt
 func (i *MidnightMarketIntent) UnmarshalJSON(data []byte) error {
 	type fields MidnightMarketIntent
 	var decoded fields
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	raw, err := decodeIntent(data, &decoded, &decoded.CommonIntent)
+	if err != nil {
 		return err
 	}
-	var raw struct {
-		Guard       json.RawMessage `json:"guard"`
-		Supplies    json.RawMessage `json:"collateral_supplies"`
-		Withdrawals json.RawMessage `json:"collateral_withdrawals"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	decoded.nullGuard = string(raw.Guard) == "null"
-	decoded.nullSupplies = string(raw.Supplies) == "null"
-	decoded.nullWithdrawals = string(raw.Withdrawals) == "null"
+	decoded.nullGuard = string(raw["guard"]) == "null"
+	decoded.nullSupplies = string(raw["collateral_supplies"]) == "null"
+	decoded.nullWithdrawals = string(raw["collateral_withdrawals"]) == "null"
 	*i = MidnightMarketIntent(decoded)
 	return nil
 }

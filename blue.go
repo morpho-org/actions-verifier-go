@@ -27,6 +27,17 @@ type BlueCalldataIntent struct {
 
 func (i BlueCalldataIntent) calldataIntent() CommonIntent { return i.CommonIntent }
 
+// UnmarshalJSON reads exact field names and distinguishes null collateral from absence.
+func (i *BlueCalldataIntent) UnmarshalJSON(data []byte) error {
+	type fields BlueCalldataIntent
+	var decoded fields
+	if _, err := decodeIntent(data, &decoded, &decoded.CommonIntent, "collateral_amount"); err != nil {
+		return err
+	}
+	*i = BlueCalldataIntent(decoded)
+	return nil
+}
+
 var blueFunctions = map[string]string{
 	"blue.supply":              "blueBundlesV1Supply",
 	"blue.withdraw":            "blueBundlesV1Withdraw",
@@ -178,7 +189,7 @@ func checkBlueFee(intent BlueCalldataIntent, fee *big.Int, to common.Address, ca
 	if err := checkFee(fee, to, intent.MaxFeeBPS, intent.ReferralFee, call); err != nil {
 		return err
 	}
-	if intent.Action != "blue.refinance" && intent.Amount.Unit == "all" && fee.Sign() > 0 {
+	if intent.Amount.Unit == "all" && fee.Sign() > 0 {
 		return recipient(to, intent.Account, "referral_fee.recipient", call)
 	}
 	return nil
