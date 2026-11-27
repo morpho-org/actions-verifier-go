@@ -29,7 +29,7 @@ func (i MidnightTakeIntent) calldataIntent() CommonIntent { return i.CommonInten
 // UnmarshalJSON preserves the distinction between omitted and null guards.
 func (i *MidnightTakeIntent) UnmarshalJSON(data []byte) error {
 	type fields MidnightTakeIntent
-	var decoded fields
+	decoded := fields{CommonIntent: CommonIntent{MaxFeeBPS: i.MaxFeeBPS}}
 	raw, err := decodeIntent(data, &decoded, &decoded.CommonIntent)
 	if err != nil {
 		return err

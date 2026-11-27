@@ -74,7 +74,7 @@ func (i MidnightMarketIntent) calldataIntent() CommonIntent { return i.CommonInt
 // UnmarshalJSON preserves the distinction between omitted and null guards and collateral lists.
 func (i *MidnightMarketIntent) UnmarshalJSON(data []byte) error {
 	type fields MidnightMarketIntent
-	var decoded fields
+	decoded := fields{CommonIntent: CommonIntent{MaxFeeBPS: i.MaxFeeBPS}}
 	raw, err := decodeIntent(data, &decoded, &decoded.CommonIntent)
 	if err != nil {
 		return err

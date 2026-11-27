@@ -115,6 +115,8 @@ func TestIntentJSONPreservesPrefilledFeeCap(t *testing.T) {
 	for _, intent := range []CalldataIntent{
 		&VaultCalldataIntent{CommonIntent: CommonIntent{MaxFeeBPS: 25}},
 		&BlueCalldataIntent{CommonIntent: CommonIntent{MaxFeeBPS: 25}},
+		&MidnightMarketIntent{CommonIntent: CommonIntent{MaxFeeBPS: 25}},
+		&MidnightTakeIntent{CommonIntent: CommonIntent{MaxFeeBPS: 25}},
 		&MidnightOfferManagementIntent{CommonIntent: CommonIntent{MaxFeeBPS: 25}},
 	} {
 		if err := json.Unmarshal([]byte(`{"amount":{"unit":"assets"}}`), intent); err != nil {
