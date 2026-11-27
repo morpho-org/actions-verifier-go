@@ -176,6 +176,9 @@ func runParity(t *testing.T, family string, intent func([]byte) (CalldataIntent,
 				}
 			}
 			if field := vector.JSONTypeError; field != nil {
+				if vector.Error == nil {
+					t.Fatal("a Go JSON type rejection is only allowed when TypeScript also rejects")
+				}
 				var mismatch *json.UnmarshalTypeError
 				if !errors.As(err, &mismatch) {
 					t.Fatalf("want JSON type error on %q, got %v", *field, err)

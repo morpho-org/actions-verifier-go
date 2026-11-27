@@ -2,7 +2,6 @@ package calldataverifier
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"math/big"
 	"strings"
 
@@ -30,20 +29,13 @@ func (i MidnightTakeIntent) calldataIntent() CommonIntent { return i.CommonInten
 // UnmarshalJSON preserves the distinction between omitted and null guards.
 func (i *MidnightTakeIntent) UnmarshalJSON(data []byte) error {
 	type fields MidnightTakeIntent
-	var decoded struct {
-		fields
-		Guard json.RawMessage `json:"guard"`
-	}
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	decoded := fields{CommonIntent: CommonIntent{MaxFeeBPS: i.MaxFeeBPS}}
+	raw, err := decodeIntent(data, &decoded, &decoded.CommonIntent)
+	if err != nil {
 		return err
 	}
-	if len(decoded.Guard) != 0 {
-		if err := json.Unmarshal(decoded.Guard, &decoded.fields.Guard); err != nil {
-			return err
-		}
-		decoded.fields.nullGuard = string(decoded.Guard) == "null"
-	}
-	*i = MidnightTakeIntent(decoded.fields)
+	decoded.nullGuard = string(raw["guard"]) == "null"
+	*i = MidnightTakeIntent(decoded)
 	return nil
 }
 
@@ -65,6 +57,13 @@ type MidnightOfferManagementIntent struct {
 }
 
 func (i MidnightOfferManagementIntent) calldataIntent() CommonIntent { return i.CommonIntent }
+
+// UnmarshalJSON reads the exact Actions API field names.
+func (i *MidnightOfferManagementIntent) UnmarshalJSON(data []byte) error {
+	type fields MidnightOfferManagementIntent
+	_, err := decodeIntent(data, (*fields)(i), &i.CommonIntent)
+	return err
+}
 
 // MidnightMakerOffers describes price or rate entries for an unsupported make-offer action.
 type MidnightMakerOffers struct {

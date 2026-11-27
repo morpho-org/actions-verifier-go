@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 const read = (name) => JSON.parse(readFileSync(new URL(`../${name}`, import.meta.url), "utf8"));
 const families = ["vault", "blue", "midnight", "offers", "proof"];
 const staticFamilies = ["vault", "blue", "midnight", "midnight-offers"];
+const intentJSONVectors = read("intent-json-vectors.json");
 const defaultJWKS = read("action-proof-jwks.json");
 const proofVectors = read("action-proof-vectors.json").proof_vectors;
 const vaultIntent = {
@@ -127,6 +128,22 @@ function replay(label, verify) {
       check(matches, `${family}-vectors.json`, index);
     }
   }
+  for (const [index, vector] of intentJSONVectors.entries()) {
+    const { intent, calls } = read(`${vector.family}-vectors.json`).cases[vector.base];
+    for (const [key, renamed] of Object.entries(vector.rename ?? {})) {
+      intent[renamed] = intent[key];
+      delete intent[key];
+    }
+    Object.assign(intent, vector.set);
+    let matches;
+    try {
+      const decoded = verify(intent, calls);
+      matches = vector.error === undefined && isDeepStrictEqual(decoded.map(({ call }) => call), calls);
+    } catch (error) {
+      matches = isDeepStrictEqual(errorSummary(error), vector.error);
+    }
+    check(matches, "intent-json-vectors.json", index);
+  }
   assert.ok(proofVectors.length > 0);
   for (const [index, vector] of proofVectors.entries()) {
     const proof = sharedProof(vector);
@@ -143,7 +160,7 @@ function replay(label, verify) {
     }
     check(matches, "action-proof-vectors.json", index);
   }
-  console.log(`${label}: ${parityCount} parity, ${staticCount} shared static, ${proofVectors.length} shared proof; ${mismatches} mismatches`);
+  console.log(`${label}: ${parityCount} parity, ${staticCount} shared static, ${proofVectors.length} shared proof, ${intentJSONVectors.length} shared intent JSON; ${mismatches} mismatches`);
   return mismatches;
 }
 

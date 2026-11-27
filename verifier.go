@@ -62,6 +62,7 @@ type CommonIntent struct {
 	Account        string `json:"account"`
 	MaxFeeBPS      int    `json:"max_fee_bps"`
 	CalldataOrigin string `json:"calldata_origin,omitempty"`
+	invalidVault   bool
 }
 
 // Amount specifies a unit and, except for "all", a decimal integer.
@@ -78,8 +79,37 @@ type Funding struct {
 
 // ReferralFee specifies the maximum referral fee and its intended recipient.
 type ReferralFee struct {
-	BPS       int    `json:"bps"`
-	Recipient string `json:"recipient"`
+	BPS        int    `json:"bps"`
+	Recipient  string `json:"recipient"`
+	missingBPS bool
+}
+
+// MarshalJSON preserves the distinction between a missing fee cap and zero.
+func (r ReferralFee) MarshalJSON() ([]byte, error) {
+	var bps *int
+	if !r.missingBPS {
+		bps = &r.BPS
+	}
+	return json.Marshal(struct {
+		BPS       *int   `json:"bps,omitempty"`
+		Recipient string `json:"recipient"`
+	}{bps, r.Recipient})
+}
+
+// UnmarshalJSON distinguishes a missing or null bps from an explicit zero.
+func (r *ReferralFee) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		BPS       *int   `json:"bps"`
+		Recipient string `json:"recipient"`
+	}
+	if err := json.Unmarshal(exactJSONFields(data, reflect.TypeOf(decoded)), &decoded); err != nil {
+		return err
+	}
+	*r = ReferralFee{Recipient: decoded.Recipient, missingBPS: decoded.BPS == nil}
+	if decoded.BPS != nil {
+		r.BPS = *decoded.BPS
+	}
+	return nil
 }
 
 // VaultCalldataIntent describes a Vault V1 or V2 action. Asset must come from
@@ -104,6 +134,13 @@ type CalldataIntent interface {
 }
 
 func (i VaultCalldataIntent) calldataIntent() CommonIntent { return i.CommonIntent }
+
+// UnmarshalJSON reads the exact Actions API field names.
+func (i *VaultCalldataIntent) UnmarshalJSON(data []byte) error {
+	type fields VaultCalldataIntent
+	_, err := decodeIntent(data, (*fields)(i), &i.CommonIntent)
+	return err
+}
 
 // VerifyOptions provides caller-owned verification configuration.
 type VerifyOptions struct {
@@ -155,7 +192,7 @@ func VerifyCalldata(intent CalldataIntent, calls []CalldataCall, options ...Veri
 	case *VaultCalldataIntent:
 		vault = i
 	}
-	if vault != nil && !nonzeroAddress(vault.Vault) {
+	if commonIntent.invalidVault || (vault != nil && !nonzeroAddress(vault.Vault)) {
 		return nil, &CalldataTargetError{detail("vault", first, nil)}
 	}
 	if commonIntent.MaxFeeBPS < 0 || commonIntent.MaxFeeBPS > 10_000 {
