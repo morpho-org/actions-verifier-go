@@ -14,6 +14,8 @@ import (
 )
 
 var wad = big.NewInt(1_000_000_000_000_000_000)
+var maxUint128 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
+
 var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 var errNonCanonical = errors.New("noncanonical ABI encoding")
 var errABIIntegerWidth = errors.New("ABI integer exceeds its declared width")

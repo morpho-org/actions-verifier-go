@@ -27,6 +27,7 @@ const (
 	maxOfferTimestamp          = 1_000_000_000_000 - 1
 	secondsPerDay              = 86_400
 	maturityTimeOfDay          = 15 * 3_600
+	offerTypeID                = "0x9905214264a9fb7b6cc1b0e33db7a04687c6e4185a84755d29914314aa9d8906"
 	priceRatifierV1OfferTypeID = "0x62a94097fbcb9b56e3cf7b4f7bb075b49540b1364815434ff4b16bc4decb303d"
 	rateRatifierV1OfferTypeID  = "0x8e0f9c17bf7e919b5f22e8c6c4e787905f45864a4be441067bbd2e65b35c3de1"
 	marketTypeID               = "0x510b3862f3816a109c9340b76972e8a30984246be06e034ae12ed2934220391a"
@@ -77,6 +78,16 @@ type makerLeaf struct {
 type makerContext struct {
 	midnightContext
 	make MidnightOfferManagementIntent
+	cap  *big.Int
+	blue *makerBlueFunding
+}
+
+type makerBlueFunding struct {
+	loanToken    common.Address
+	assets       *big.Int
+	salt         [32]byte
+	callback     common.Address
+	callbackData []byte
 }
 
 func mustType(t string, components []abi.ArgumentMarshaling) abi.Type {
@@ -140,9 +151,6 @@ func verifyMidnightMake(intent MidnightOfferManagementIntent, calls []CalldataCa
 	if err != nil {
 		return nil, err
 	}
-	if intent.Action == "midnight.make_lend" && intent.FundingSource != nil && intent.FundingSource.Type != "wallet" {
-		return nil, &CalldataUnsupportedError{detail("funding_source", &call, nil)}
-	}
 	if err := target(call, chain.MidnightBundlesV2); err != nil {
 		return nil, err
 	}
@@ -153,10 +161,21 @@ func verifyMidnightMake(intent MidnightOfferManagementIntent, calls []CalldataCa
 	if decoded.FunctionName != "midnightBundlesV2CancelAndMake" {
 		return nil, callError("function", &call)
 	}
-	c := makerContext{midnightContext{
+	side := makerSides[intent.Action]
+	if intent.Amount.Unit != side.unit {
+		return nil, amountError("amount.unit", call)
+	}
+	cap, err := readUint(intent.Amount.Value, "amount", call)
+	if err != nil {
+		return nil, err
+	}
+	c := makerContext{midnightContext: midnightContext{
 		intent: MidnightMarketIntent{CommonIntent: intent.CommonIntent, Funding: intent.Funding},
 		chain:  chain, call: call,
-	}, intent}
+	}, make: intent, cap: cap}
+	if c.blue, err = c.blueFunding(decoded.Args); err != nil {
+		return nil, err
+	}
 	if err := c.envelope(decoded.Args); err != nil {
 		return nil, err
 	}
@@ -168,20 +187,18 @@ func verifyMidnightMake(intent MidnightOfferManagementIntent, calls []CalldataCa
 	if err != nil {
 		return nil, err
 	}
-	if makerSides[intent.Action].buy {
-		token := offers[0].Market.LoanToken
-		for _, offer := range offers {
-			if offer.Market.LoanToken != token {
-				return nil, &CalldataTargetError{detail("offers.loan_token", &call, nil)}
+	if side.buy {
+		token, spender, assets := offers[0].Market.LoanToken, chain.Midnight, new(big.Int)
+		if c.blue != nil {
+			if c.blue.loanToken != token {
+				return nil, &CalldataTargetError{detail("funding_source.market_id", &call, nil)}
 			}
+			spender = chain.MidnightBundlesV2
 		}
-		assets := new(big.Int)
 		if intent.Action == "midnight.make_lend" {
-			if assets, err = readUint(intent.Amount.Value, "amount", call); err != nil {
-				return nil, err
-			}
+			assets = cap
 		}
-		pulls = append(pulls, midnightPull{token: token, assets: assets, spender: chain.Midnight})
+		pulls = append(pulls, midnightPull{token: token, assets: assets, spender: spender})
 	}
 	checked, err := c.prerequisites(calls[:len(calls)-1], pulls, true)
 	if err != nil {
@@ -190,14 +207,41 @@ func verifyMidnightMake(intent MidnightOfferManagementIntent, calls []CalldataCa
 	return append(checked, decoded), nil
 }
 
+func (c makerContext) blueFunding(args []any) (*makerBlueFunding, error) {
+	market, assets, salt := converted[blueMarketParams](args[0]), args[1].(*big.Int), args[2].([32]byte)
+	var source *MidnightFundingSource
+	if c.make.Action == "midnight.make_lend" {
+		source = c.make.FundingSource
+	}
+	if source != nil && source.Type != "wallet" && source.Type != "variable_rate_market" {
+		return nil, &CalldataUnsupportedError{detail("funding_source", &c.call, nil)}
+	}
+	if source == nil || source.Type != "variable_rate_market" {
+		if market.LoanToken != (common.Address{}) || market.CollateralToken != (common.Address{}) ||
+			market.Oracle != (common.Address{}) || market.Irm != (common.Address{}) || market.Lltv.Sign() != 0 ||
+			assets.Sign() != 0 || salt != [32]byte{} {
+			return nil, callError("funding_source", &c.call)
+		}
+		return nil, nil
+	}
+	callbackData, err := defaultSnapshot.market.Pack(market)
+	if err != nil || !strings.EqualFold(crypto.Keccak256Hash(callbackData).Hex(), source.MarketID) {
+		return nil, &CalldataTargetError{detail("funding_source.market_id", &c.call, err)}
+	}
+	if c.cap.Sign() == 0 || c.cap.BitLen() > 128 || assets.Cmp(c.cap) != 0 {
+		return nil, amountError("amount", c.call)
+	}
+	callback, ok := blueBuyCallbackAddress(c.chain, common.HexToAddress(c.make.Account), salt)
+	if !ok {
+		return nil, &CalldataUnsupportedError{detail("funding_source", &c.call, nil)}
+	}
+	return &makerBlueFunding{
+		loanToken: market.LoanToken, assets: assets, salt: salt, callback: callback, callbackData: callbackData,
+	}, nil
+}
+
 func (c makerContext) envelope(args []any) error {
 	var zeroHash [32]byte
-	blueMarket := converted[blueMarketParams](args[0])
-	if blueMarket.LoanToken != (common.Address{}) || blueMarket.CollateralToken != (common.Address{}) ||
-		blueMarket.Oracle != (common.Address{}) || blueMarket.Irm != (common.Address{}) || blueMarket.Lltv.Sign() != 0 ||
-		args[1].(*big.Int).Sign() != 0 || args[2].([32]byte) != zeroHash {
-		return callError("funding_source", &c.call)
-	}
 	if args[7].(*big.Int).Sign() != 0 || args[8].(*big.Int).Sign() != 0 || args[9].(*big.Int).Sign() != 0 ||
 		args[10].(uint8) != 0 || args[11].([32]byte) != zeroHash || args[12].([32]byte) != zeroHash {
 		return callError("root_signature", &c.call)
@@ -222,23 +266,28 @@ func (c makerContext) offers(args []any) ([]midnightOffer, error) {
 	if !sameAddress(args[5].(common.Address).Hex(), ratifier) {
 		return nil, &CalldataTargetError{detail("ratifier", &call, nil)}
 	}
-	if len(offers.Entries) == 0 {
+	if len(offers.Entries) == 0 || slices.ContainsFunc(offers.Entries, func(entry MidnightMakerOfferEntry) bool { return entry.missing }) {
 		return nil, callError("offers.entries", &call)
 	}
-	side := makerSides[c.make.Action]
-	if c.make.Amount.Unit != side.unit {
-		return nil, amountError("amount.unit", call)
-	}
-	cap, err := readUint(c.make.Amount.Value, "amount", call)
-	if err != nil {
-		return nil, err
-	}
-	items, err := decodeOfferPayload(args[14].([]byte))
+	items, err := decodeOfferPayload(args[14].([]byte), len(offers.Entries))
 	if err != nil {
 		return nil, &CalldataDecodeError{detail("payload", &call, err)}
 	}
 	if len(items) != len(offers.Entries) {
 		return nil, callError("offers.entries", &call)
+	}
+	if c.blue != nil {
+		members := make([][]byte, len(items))
+		for i, item := range items {
+			offer := item.Offer
+			offer.MaxAssets, offer.Callback, offer.CallbackData = c.cap, common.Address{}, nil
+			member := protocolOfferHash(offer, [32]byte{})
+			members[i] = member[:]
+		}
+		slices.SortFunc(members, bytes.Compare)
+		if crypto.Keccak256Hash(members...) != c.blue.salt {
+			return nil, callError("callback_salt", &call)
+		}
 	}
 	leaves, root, group, err := rebuildOfferTree(items, offers.Type == "rate")
 	if err != nil && !errors.Is(err, errOfferRootMismatch) {
@@ -252,7 +301,7 @@ func (c makerContext) offers(args []any) ([]midnightOffer, error) {
 		if leaf.allowedTaker != (common.Address{}) {
 			return nil, callError("offers.allowed_taker", &call)
 		}
-		if err := c.offer(leaf, offers.Entries[i], ratifier, cap); err != nil {
+		if err := c.offer(leaf, offers.Entries[i], ratifier); err != nil {
 			return nil, err
 		}
 		result[i] = leaf.offer
@@ -265,7 +314,7 @@ func (c makerContext) offers(args []any) ([]midnightOffer, error) {
 	return result, nil
 }
 
-func (c makerContext) offer(leaf makerLeaf, entry MidnightMakerOfferEntry, ratifier string, cap *big.Int) error {
+func (c makerContext) offer(leaf makerLeaf, entry MidnightMakerOfferEntry, ratifier string) error {
 	call, offer, side := c.call, leaf.offer, makerSides[c.make.Action]
 	id, err := c.marketID(offer.Market)
 	if err != nil {
@@ -285,8 +334,12 @@ func (c makerContext) offer(leaf makerLeaf, entry MidnightMakerOfferEntry, ratif
 	if err := recipient(offer.ReceiverIfMakerIsSeller, receiver, "offers.receiver", call); err != nil {
 		return err
 	}
+	callback, callbackData, cap := common.Address{}, []byte(nil), c.cap
+	if c.blue != nil {
+		callback, callbackData, cap = c.blue.callback, c.blue.callbackData, maxUint128
+	}
 	if offer.Buy != side.buy || offer.ReduceOnly != side.reduceOnly || !sameAddress(offer.Ratifier.Hex(), ratifier) ||
-		offer.Callback != (common.Address{}) || len(offer.CallbackData) != 0 || offer.ContinuousFeeCap.Sign() != 0 {
+		offer.Callback != callback || !bytes.Equal(offer.CallbackData, callbackData) || offer.ContinuousFeeCap.Sign() != 0 {
 		return callError("offers", &call)
 	}
 	if offer.Start.Cmp(new(big.Int).SetUint64(entry.StartsAt)) != 0 || offer.Expiry.Cmp(new(big.Int).SetUint64(entry.ExpiresAt)) != 0 {
@@ -342,10 +395,17 @@ func (c makerContext) collateralSupplies(args []any, offers []midnightOffer) ([]
 		if market.ChainId.Sign() != 0 || market.Midnight != (common.Address{}) || market.LoanToken != (common.Address{}) ||
 			len(market.CollateralParams) != 0 || market.Maturity.Sign() != 0 || market.RcfThreshold.Sign() != 0 ||
 			market.EnterGate != (common.Address{}) || market.LiquidatorGate != (common.Address{}) ||
-			len(supplies) != 0 || value.Sign() != 0 || wrapped != (common.Address{}) {
+			len(supplies) != 0 || (c.blue == nil && (value.Sign() != 0 || wrapped != (common.Address{}))) {
 			return nil, callError("collateral_supplies", &call)
 		}
-		return nil, nil
+		if c.blue == nil || (value.Sign() == 0 && wrapped == (common.Address{})) {
+			return nil, nil
+		}
+		if value.Sign() == 0 || !sameAddress(c.blue.loanToken.Hex(), c.chain.WNative) ||
+			!sameAddress(wrapped.Hex(), c.chain.WNative) || value.Cmp(c.blue.assets) > 0 {
+			return nil, amountError("value", call)
+		}
+		return nil, checkNativeBudget(value, c.make.Funding, call)
 	}
 	id, err := c.marketID(market)
 	if err != nil {
@@ -393,7 +453,7 @@ func midnightMarketID(market midnightMarket) (common.Hash, error) {
 	return crypto.Keccak256Hash([]byte{255}, market.Midnight[:], make([]byte, 32), creationHash), nil
 }
 
-func decodeOfferPayload(payload []byte) ([]midnightPayloadItem, error) {
+func decodeOfferPayload(payload []byte, maxItems int) ([]midnightPayloadItem, error) {
 	if len(payload) < 5 || len(payload) > maxPayloadBytes || payload[0] != 1 ||
 		uint64(len(payload)) != 5+uint64(binary.BigEndian.Uint32(payload[1:5])) {
 		return nil, errInvalidOfferPayload
@@ -411,6 +471,9 @@ func decodeOfferPayload(payload []byte) ([]midnightPayloadItem, error) {
 		return nil, err
 	}
 	if len(data) > maxDecompressedItemsBytes || len(data) < 64 {
+		return nil, errInvalidOfferPayload
+	}
+	if count := new(big.Int).SetBytes(data[32:64]); count.Cmp(big.NewInt(int64(maxItems))) > 0 {
 		return nil, errInvalidOfferPayload
 	}
 	args, err := unpackCanonical(payloadItemsArguments, data, true)
@@ -590,6 +653,31 @@ func hashMakerLeaf(leaf makerLeaf, rate, member bool) [32]byte {
 		encoded = append(encoded, word(value)...)
 	}
 	return crypto.Keccak256Hash(encoded)
+}
+
+func protocolOfferHash(offer midnightOffer, group [32]byte) [32]byte {
+	market := midnightMarketHash(offer.Market)
+	var encoded []byte
+	for _, word := range [][]byte{
+		common.FromHex(offerTypeID), market[:], boolWord(offer.Buy),
+		common.BytesToHash(offer.Maker[:]).Bytes(), common.BigToHash(offer.Start).Bytes(),
+		common.BigToHash(offer.Expiry).Bytes(), common.BigToHash(offer.Tick).Bytes(), group[:],
+		common.BytesToHash(offer.Callback[:]).Bytes(), crypto.Keccak256(offer.CallbackData),
+		common.BytesToHash(offer.ReceiverIfMakerIsSeller[:]).Bytes(), common.BytesToHash(offer.Ratifier[:]).Bytes(),
+		boolWord(offer.ReduceOnly), common.BigToHash(offer.MaxUnits).Bytes(), common.BigToHash(offer.MaxAssets).Bytes(),
+		common.BigToHash(offer.ContinuousFeeCap).Bytes(),
+	} {
+		encoded = append(encoded, word...)
+	}
+	return crypto.Keccak256Hash(encoded)
+}
+
+func boolWord(v bool) []byte {
+	word := make([]byte, 32)
+	if v {
+		word[31] = 1
+	}
+	return word
 }
 
 func midnightMarketHash(market midnightMarket) [32]byte {

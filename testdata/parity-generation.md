@@ -53,9 +53,10 @@ run the companion command with `--check` before publishing a fixture update.
 ## Pending make-offer parity
 
 The pinned verifier rejects every `midnight.make_*` action, so its suite has
-no make-offer cases. Until the make-offer rule from sdks-internal#1288 is
-released and the pin above moves past it, `generate-maker-parity.py` captures
-that draft's `midnightMakers.test.ts` at the revision in the script into
+no make-offer cases. Until the make-offer rule from sdks-internal#1288 and
+#1290 is released and the pin above moves past it, `generate-maker-parity.py`
+captures `midnightMakers.test.ts` at the sdks-internal main revision in the
+script into
 `testdata/pending-parity-makers.json`, with the same capture plugin. Run it on
 a clean checkout of that revision with its lockfile dependencies installed:
 

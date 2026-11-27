@@ -39,6 +39,7 @@ const deployments = Object.fromEntries(
       midnightBundlesV2: address.midnightBundlesV2,
       priceRatifierV1: address.priceRatifierV1,
       rateRatifierV1: address.rateRatifierV1,
+      midnightBlueBuyCallbackFactory: address.midnightBlueBuyCallbackFactory,
     }];
   }),
 );

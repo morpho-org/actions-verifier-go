@@ -1,9 +1,9 @@
-"""Capture the pending make-offer parity fixture from sdks-internal#1288.
+"""Capture the pending make-offer parity fixture from sdks-internal main.
 
 The published verifier pinned in generate-snapshot.ts rejects every
 midnight.make_* action, so its suite has no make-offer cases. Until the
-make-offer rule is released and the pin moves past it, this script records the
-draft's midnightMakers.test.ts cases at the revision below.
+make-offer rule is released and the pin moves past it, this script records
+midnightMakers.test.ts cases at the revision below (sdks-internal#1290).
 """
 import argparse
 import importlib.util
@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-revision = "48d5157959f2c3127dd4d5822bc8f4d2e3fe6f07"
+revision = "61a288bc9170062ac356ff01ef7785158a161fcd"
 root = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("generate_parity", root / "generate-parity.py")
 parity = importlib.util.module_from_spec(spec)

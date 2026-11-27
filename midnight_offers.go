@@ -1,7 +1,9 @@
 package calldataverifier
 
 import (
+	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"math/big"
 	"strings"
 
@@ -78,6 +80,22 @@ type MidnightMakerOfferEntry struct {
 	ExpiresAt uint64 `json:"expires_at"`
 	Tick      string `json:"tick,omitempty"`
 	RateWAD   string `json:"rate_wad,omitempty"`
+	missing   bool
+}
+
+// UnmarshalJSON marks a null entry, which verification rejects like a hole in a JavaScript entry list.
+func (e *MidnightMakerOfferEntry) UnmarshalJSON(data []byte) error {
+	if string(bytes.TrimSpace(data)) == "null" {
+		*e = MidnightMakerOfferEntry{missing: true}
+		return nil
+	}
+	type plain MidnightMakerOfferEntry
+	var entry plain
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return err
+	}
+	*e = MidnightMakerOfferEntry(entry)
+	return nil
 }
 
 // MidnightFundingSource identifies wallet funding or a variable rate market.

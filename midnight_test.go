@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 func TestParityMidnight(t *testing.T) {
@@ -190,4 +191,23 @@ func TestMidnightUnitsBuyPull(t *testing.T) {
 	if _, err = VerifyCalldata(intent, calls); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// midnight.test.ts: Midnight take guards added after 0.2.0.
+func TestMidnightTakeGuards(t *testing.T) {
+	vector := loadVectors[MidnightMarketIntent](t, "midnight-vectors.json")["repay_native"]
+	last := vector.Calls[len(vector.Calls)-1]
+	t.Run("native value without funding", func(t *testing.T) {
+		unfunded := vector.Intent
+		unfunded.Funding = nil
+		_, err := VerifyCalldata(unfunded, vector.Calls)
+		requireError[*CalldataAmountError](t, err, "value", &last.ID)
+	})
+	t.Run("bundle function outside the take rules", func(t *testing.T) {
+		calls := append([]CalldataCall(nil), vector.Calls...)
+		calls[len(calls)-1].Value = "0"
+		calls[len(calls)-1].Data = hexutil.Encode(defaultSnapshot.abis["midnightBundle"].Methods["MIDNIGHT"].ID)
+		_, err := VerifyCalldata(vector.Intent, calls)
+		requireError[*CalldataCallError](t, err, "function", &last.ID)
+	})
 }

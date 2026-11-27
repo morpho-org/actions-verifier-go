@@ -107,16 +107,17 @@ func ExampleVerifyCalldata_midnight() {
 }
 
 func ExampleVerifyCalldata_unsupportedOffer() {
-	intent := calldataverifier.MidnightOfferManagementIntent{
+	intent := calldataverifier.MidnightTakeIntent{
 		CommonIntent: calldataverifier.CommonIntent{
-			Action: "midnight.make_lend", ChainID: 8453,
+			Action: "midnight.take_lend", ChainID: 8453,
 			Account: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
 		},
-		// Lending from a variable rate market needs a callback the verifier cannot derive.
-		FundingSource: &calldataverifier.MidnightFundingSource{Type: "variable_rate_market"},
+		Amount: calldataverifier.Amount{Unit: "assets", Value: "1000000"},
+		// Without the request's market ID, a group does not identify the offers taken.
+		Group: "0x0000000000000000000000000000000000000000000000000000000000000001",
 	}
 	calls := []calldataverifier.CalldataCall{{
-		ID: "make", Kind: "midnightCancelAndMake", Value: "0",
+		ID: "take", Kind: "midnightTake", Value: "0",
 		To: "0x78edB268D228529715744211E11A5d50fd2BDbA4",
 	}}
 	_, err := calldataverifier.VerifyCalldata(intent, calls)
@@ -124,7 +125,7 @@ func ExampleVerifyCalldata_unsupportedOffer() {
 	if errors.As(err, &unsupported) {
 		fmt.Println(unsupported.Field)
 	}
-	// Output: funding_source
+	// Output: market_id
 }
 
 func ExampleVerifyCalldata_actionProof() {
