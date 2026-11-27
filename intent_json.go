@@ -60,10 +60,6 @@ func decodeIntent(data []byte, dst any, common *CommonIntent) (map[string]json.R
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
 	}
-	if vault, exists := raw["vault"]; exists {
-		var address string
-		common.invalidVault = json.Unmarshal(vault, &address) != nil || !nonzeroAddress(address)
-	}
 	if string(raw["referral_fee"]) == "null" {
 		raw["referral_fee"] = json.RawMessage("{}")
 	}
@@ -76,6 +72,9 @@ func decodeIntent(data []byte, dst any, common *CommonIntent) (map[string]json.R
 	if err := json.Unmarshal(filtered, dst); err != nil {
 		return nil, err
 	}
+	vault, hasVault := raw["vault"]
+	var address string
+	common.invalidVault = hasVault && (json.Unmarshal(vault, &address) != nil || !nonzeroAddress(address))
 	if fee := raw["max_fee_bps"]; string(fee) == "null" || (len(fee) == 0 && common.MaxFeeBPS == 0) {
 		common.MaxFeeBPS = -1
 	}

@@ -164,6 +164,27 @@ func TestReferralFeeJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestIntentJSONClearsForeignInvalidVault(t *testing.T) {
+	for _, intent := range []CalldataIntent{new(BlueCalldataIntent), new(MidnightOfferManagementIntent)} {
+		for _, tc := range []struct {
+			input   string
+			invalid bool
+		}{
+			{`{"vault":null}`, true},
+			{`{"Vault":null}`, false},
+			{`{"vault":"bad"}`, true},
+			{`{}`, false},
+		} {
+			if err := json.Unmarshal([]byte(tc.input), intent); err != nil {
+				t.Fatal(err)
+			}
+			if invalid := intent.calldataIntent().invalidVault; invalid != tc.invalid {
+				t.Fatalf("%T after %s: invalidVault = %t, want %t", intent, tc.input, invalid, tc.invalid)
+			}
+		}
+	}
+}
+
 func readJSONFixture(t *testing.T, name string, dst any) {
 	t.Helper()
 	raw, err := os.ReadFile(name)
