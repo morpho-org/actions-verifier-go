@@ -61,12 +61,8 @@ func (i MidnightOfferManagementIntent) calldataIntent() CommonIntent { return i.
 // UnmarshalJSON reads the exact Actions API field names.
 func (i *MidnightOfferManagementIntent) UnmarshalJSON(data []byte) error {
 	type fields MidnightOfferManagementIntent
-	var decoded fields
-	if _, err := decodeIntent(data, &decoded, &decoded.CommonIntent); err != nil {
-		return err
-	}
-	*i = MidnightOfferManagementIntent(decoded)
-	return nil
+	_, err := decodeIntent(data, (*fields)(i), &i.CommonIntent)
+	return err
 }
 
 // MidnightMakerOffers describes price or rate entries for an unsupported make-offer action.

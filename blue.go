@@ -30,11 +30,13 @@ func (i BlueCalldataIntent) calldataIntent() CommonIntent { return i.CommonInten
 // UnmarshalJSON reads exact field names and distinguishes null collateral from absence.
 func (i *BlueCalldataIntent) UnmarshalJSON(data []byte) error {
 	type fields BlueCalldataIntent
-	var decoded fields
-	if _, err := decodeIntent(data, &decoded, &decoded.CommonIntent, "collateral_amount"); err != nil {
+	raw, err := decodeIntent(data, (*fields)(i), &i.CommonIntent)
+	if err != nil {
 		return err
 	}
-	*i = BlueCalldataIntent(decoded)
+	if string(raw["collateral_amount"]) == "null" {
+		i.CollateralAmount = &Amount{}
+	}
 	return nil
 }
 

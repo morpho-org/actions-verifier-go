@@ -126,12 +126,8 @@ func (i VaultCalldataIntent) calldataIntent() CommonIntent { return i.CommonInte
 // UnmarshalJSON reads the exact Actions API field names.
 func (i *VaultCalldataIntent) UnmarshalJSON(data []byte) error {
 	type fields VaultCalldataIntent
-	var decoded fields
-	if _, err := decodeIntent(data, &decoded, &decoded.CommonIntent); err != nil {
-		return err
-	}
-	*i = VaultCalldataIntent(decoded)
-	return nil
+	_, err := decodeIntent(data, (*fields)(i), &i.CommonIntent)
+	return err
 }
 
 // VerifyOptions provides caller-owned verification configuration.

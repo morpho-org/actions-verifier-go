@@ -85,6 +85,32 @@ func TestIntentJSONParity(t *testing.T) {
 	}
 }
 
+func TestIntentJSONPreservesPrefilledFields(t *testing.T) {
+	vault := VaultCalldataIntent{Asset: "trusted asset", Amount: Amount{Unit: "assets", Value: "100"}}
+	blue := BlueCalldataIntent{Market: "trusted market", CollateralAmount: &Amount{Unit: "assets", Value: "100"}}
+	offer := MidnightOfferManagementIntent{Groups: []string{"trusted group"}}
+	for _, intent := range []CalldataIntent{&vault, &blue, &offer} {
+		if err := json.Unmarshal([]byte(`{"max_fee_bps":0,"amount":{"value":"200"}}`), intent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if vault.Asset != "trusted asset" || vault.Amount != (Amount{Unit: "assets", Value: "200"}) {
+		t.Fatalf("lost prefilled Vault fields: %+v", vault)
+	}
+	if blue.Market != "trusted market" || blue.CollateralAmount == nil || blue.CollateralAmount.Value != "100" {
+		t.Fatalf("lost prefilled Blue fields: %+v", blue)
+	}
+	if !reflect.DeepEqual(offer.Groups, []string{"trusted group"}) {
+		t.Fatalf("lost prefilled Midnight offer groups: %v", offer.Groups)
+	}
+	if err := json.Unmarshal([]byte(`{"max_fee_bps":0,"collateral_amount":null}`), &blue); err != nil {
+		t.Fatal(err)
+	}
+	if blue.CollateralAmount == nil || *blue.CollateralAmount != (Amount{}) {
+		t.Fatalf("expected null collateral to override the prefilled value, got %+v", blue.CollateralAmount)
+	}
+}
+
 func readJSONFixture(t *testing.T, name string, dst any) {
 	t.Helper()
 	raw, err := os.ReadFile(name)

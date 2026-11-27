@@ -55,7 +55,7 @@ func collectJSONFields(raw, exact map[string]json.RawMessage, typ reflect.Type) 
 	}
 }
 
-func decodeIntent(data []byte, dst any, common *CommonIntent, nullObjects ...string) (map[string]json.RawMessage, error) {
+func decodeIntent(data []byte, dst any, common *CommonIntent) (map[string]json.RawMessage, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
@@ -66,11 +66,6 @@ func decodeIntent(data []byte, dst any, common *CommonIntent, nullObjects ...str
 	}
 	if string(raw["referral_fee"]) == "null" {
 		raw["referral_fee"] = json.RawMessage("{}")
-	}
-	for _, field := range nullObjects {
-		if string(raw[field]) == "null" {
-			raw[field] = json.RawMessage("{}")
-		}
 	}
 	exact := make(map[string]json.RawMessage)
 	collectJSONFields(raw, exact, reflect.TypeOf(dst).Elem())
