@@ -106,7 +106,7 @@ Use `MidnightMarketIntent` with the original market ID and requested amounts.
 | `midnight.market_repay` | `Type: "market"`; assets or units, with optional collateral withdrawals and an amount guard. |
 | `midnight.withdraw`, `midnight.redeem` | Assets, units, or all as supported by the call form. |
 | `midnight.supply_collateral` | The collateral token and asset amount, with optional `Funding` for the native bundle route. |
-| `midnight.withdraw_collateral` | Set `CollateralWithdrawals` (`collateral_withdrawals` in JSON), even for one token. Each entry specifies a collateral token and an amount with unit `"assets"` or `"all"`. Use one entry per withdrawal in a multicall. |
+| `midnight.withdraw_collateral` | Set `CollateralWithdrawals` (`collateral_withdrawals` in JSON), even for one token. Each entry specifies a collateral token and an amount with unit `"assets"` or `"all"`. In a multicall, use one entry per distinct token; repeated withdrawals of the same token are rejected. |
 
 Standalone collateral supply supports direct Midnight `supplyCollateral` with
 zero native value and no authorization prerequisite. For native funding, use
