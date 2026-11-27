@@ -22,13 +22,14 @@ func TestParityMidnightMakers(t *testing.T) {
 	runParityFixture(t, "testdata/pending-parity-makers.json", makerParityRevision, nil, midnightOfferParityIntent, nil)
 }
 
+var makerParityPin = regexp.MustCompile(`(?m)^revision = "([a-f0-9]{40})"\r?$`)
+
 func TestMakerParityPin(t *testing.T) {
 	generator, err := os.ReadFile("generate-maker-parity.py")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin := regexp.MustCompile(`(?m)^revision = "([a-f0-9]{40})"
-?$`).FindSubmatch(generator)
+	pin := makerParityPin.FindSubmatch(generator)
 	if len(pin) != 2 || string(pin[1]) != makerParityRevision {
 		t.Fatal("make-offer parity generator and Go pins differ")
 	}
@@ -183,6 +184,7 @@ func TestMidnightMakeLend(t *testing.T) {
 }
 
 // BlueBuyCallback.test.ts: the factory's CREATE2 address on every chain that has one.
+// The 4217 and 42161 vectors come from midnight-sdk's getBlueBuyCallbackAddress at the maker parity revision.
 func TestBlueBuyCallbackAddress(t *testing.T) {
 	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	var salt [32]byte
@@ -202,6 +204,8 @@ func TestBlueBuyCallbackAddress(t *testing.T) {
 		143:    "0xe805df25F67EF7592aA7a972B418Fc6660aE78F6",
 		988:    "0x8E73911e66f7ED89A2490619050D7638Bc15C057",
 		29032:  "0x7A6C0CC163505B8db00AFaA0ec5b1eA401F14A16",
+		4217:   "0x61b77C9D386875af7d637151CDe7e88BE94fA24B",
+		42161:  "0x0f6eC061fD4f862bcAEE2878672EF357bE0E0391",
 	} {
 		got, ok := blueBuyCallbackAddress(defaultSnapshot.Deployments[chain], owner, salt)
 		if !ok || got.Hex() != want {
@@ -277,4 +281,33 @@ func TestMidnightBlueFundedMakeLend(t *testing.T) {
 		_, err := VerifyCalldata(changed, calls)
 		requireError[*CalldataAmountError](t, err, "amount", &id)
 	})
+}
+
+// An empty CollateralSupplies list is sent as an absent one, because the JSON field is omitempty.
+func TestMidnightMakeBorrowEmptyCollateral(t *testing.T) {
+	intent, calls := makerCase(t, "midnightMakers.test.ts:363/1")
+	if intent.Action != "midnight.make_borrow" || intent.CollateralSupplies != nil {
+		t.Fatalf("unexpected no-collateral borrow vector %s", intent.Action)
+	}
+	intent.CollateralSupplies = []MidnightCollateralTransfer{}
+	if _, err := VerifyCalldata(intent, calls); err != nil {
+		t.Fatal(err)
+	}
+	collateral, collateralCalls := makerCase(t, "midnightMakers.test.ts:389/1")
+	collateral.CollateralSupplies = []MidnightCollateralTransfer{}
+	id := collateralCalls[len(collateralCalls)-1].ID
+	_, err := VerifyCalldata(collateral, collateralCalls)
+	requireError[*CalldataCallError](t, err, "collateral_supplies", &id)
+}
+
+func TestMakerParityPinCRLF(t *testing.T) {
+	generator, err := os.ReadFile("generate-maker-parity.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	crlf := bytes.ReplaceAll(generator, []byte("\n"), []byte("\r\n"))
+	pin := makerParityPin.FindSubmatch(crlf)
+	if len(pin) != 2 || string(pin[1]) != makerParityRevision {
+		t.Fatal("make-offer parity pin not found in a CRLF checkout")
+	}
 }

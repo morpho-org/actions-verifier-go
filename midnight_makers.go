@@ -391,7 +391,7 @@ func (c makerContext) collateralSupplies(args []any, offers []midnightOffer) ([]
 	if c.make.Action == "midnight.make_borrow" {
 		requested = c.make.CollateralSupplies
 	}
-	if requested == nil {
+	if len(requested) == 0 {
 		if market.ChainId.Sign() != 0 || market.Midnight != (common.Address{}) || market.LoanToken != (common.Address{}) ||
 			len(market.CollateralParams) != 0 || market.Maturity.Sign() != 0 || market.RcfThreshold.Sign() != 0 ||
 			market.EnterGate != (common.Address{}) || market.LiquidatorGate != (common.Address{}) ||

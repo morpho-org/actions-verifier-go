@@ -295,6 +295,11 @@ proof-free path if your application requires proof.
   sdks-internal `61a288b`, the unreleased TypeScript calldata-verifier 0.3.0.
   TypeScript 0.2.0 returns `CalldataUnsupportedError` for every
   `midnight.make_*` action.
+- Go treats an empty `CollateralSupplies` on `midnight.make_borrow` like an
+  absent one, because `omitempty` drops it from the request JSON. TypeScript
+  treats an explicit `collateral_supplies: []` as a collateral request and
+  rejects a no-collateral call with `CalldataTargetError` on `market`. The
+  Actions API rejects `collateral_supplies: []`, so no valid response differs.
 - For variable-rate funded `midnight.make_lend`, Go derives the callback from
   the resolved registry, so a `NewRegistry` chain that adds
   `MidnightBlueBuyCallbackFactory` is supported. A chain without one returns
