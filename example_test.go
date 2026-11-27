@@ -107,18 +107,25 @@ func ExampleVerifyCalldata_midnight() {
 }
 
 func ExampleVerifyCalldata_unsupportedOffer() {
-	intent := calldataverifier.MidnightOfferManagementIntent{
+	intent := calldataverifier.MidnightTakeIntent{
 		CommonIntent: calldataverifier.CommonIntent{
-			Action: "midnight.make_lend", ChainID: 8453,
+			Action: "midnight.take_lend", ChainID: 8453,
 			Account: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
 		},
+		Amount: calldataverifier.Amount{Unit: "assets", Value: "1000000"},
+		// Without the request's market ID, a group does not identify the offers taken.
+		Group: "0x0000000000000000000000000000000000000000000000000000000000000001",
 	}
-	_, err := calldataverifier.VerifyCalldata(intent, []calldataverifier.CalldataCall{})
+	calls := []calldataverifier.CalldataCall{{
+		ID: "take", Kind: "midnightTake", Value: "0",
+		To: "0x78edB268D228529715744211E11A5d50fd2BDbA4",
+	}}
+	_, err := calldataverifier.VerifyCalldata(intent, calls)
 	var unsupported *calldataverifier.CalldataUnsupportedError
 	if errors.As(err, &unsupported) {
 		fmt.Println(unsupported.Field)
 	}
-	// Output: midnight.make_lend
+	// Output: market_id
 }
 
 func ExampleVerifyCalldata_actionProof() {

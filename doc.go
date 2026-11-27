@@ -5,7 +5,7 @@
 // calls, returning typed errors for failed checks. Supply the original intent,
 // funding, and fee limits independently of the response.
 // Invoke the verified calls only from the intended account and chain.
-// Midnight make-offer actions are unsupported.
+// Midnight make-offer actions are checked against their published offer payload.
 // With VerifyOptions.Proof, VerifyCalldata verifies the Actions API's ES256
 // proof signature and authenticates the exact request, response, and ordered
 // calls before static validation, using caller-supplied trusted JWKS and time.

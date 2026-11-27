@@ -22,6 +22,10 @@ type Deployment struct {
 	BlueBundlesV1      string `json:"blueBundlesV1"`
 	Midnight           string `json:"midnight"`
 	MidnightBundlesV2  string `json:"midnightBundlesV2"`
+	PriceRatifierV1    string `json:"priceRatifierV1"`
+	RateRatifierV1     string `json:"rateRatifierV1"`
+	// MidnightBlueBuyCallbackFactory derives the BlueBuyCallback that funds variable-rate make_lend offers.
+	MidnightBlueBuyCallbackFactory string `json:"midnightBlueBuyCallbackFactory"`
 }
 
 // Registry is an immutable snapshot of the default and caller-trusted deployments.
@@ -55,6 +59,9 @@ func NewRegistry(additions map[uint64]Deployment) (*Registry, error) {
 			{"blueBundlesV1", &base.BlueBundlesV1, update.BlueBundlesV1},
 			{"midnight", &base.Midnight, update.Midnight},
 			{"midnightBundlesV2", &base.MidnightBundlesV2, update.MidnightBundlesV2},
+			{"priceRatifierV1", &base.PriceRatifierV1, update.PriceRatifierV1},
+			{"rateRatifierV1", &base.RateRatifierV1, update.RateRatifierV1},
+			{"midnightBlueBuyCallbackFactory", &base.MidnightBlueBuyCallbackFactory, update.MidnightBlueBuyCallbackFactory},
 		} {
 			if field.src == "" {
 				continue
