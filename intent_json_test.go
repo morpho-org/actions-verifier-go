@@ -111,6 +111,38 @@ func TestIntentJSONPreservesPrefilledFields(t *testing.T) {
 	}
 }
 
+func TestReferralFeeJSONRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name, before, after string
+		missing             bool
+	}{
+		{"missing", `{"recipient":"recipient"}`, `{"recipient":"recipient"}`, true},
+		{"null", `{"bps":null,"recipient":"recipient"}`, `{"recipient":"recipient"}`, true},
+		{"zero", `{"bps":0,"recipient":"recipient"}`, `{"bps":0,"recipient":"recipient"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var fee ReferralFee
+			if err := json.Unmarshal([]byte(tc.before), &fee); err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(fee)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(encoded) != tc.after {
+				t.Fatalf("expected %s, got %s", tc.after, encoded)
+			}
+			var decoded ReferralFee
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded.missingBPS != tc.missing {
+				t.Fatalf("missing bps = %t, want %t", decoded.missingBPS, tc.missing)
+			}
+		})
+	}
+}
+
 func readJSONFixture(t *testing.T, name string, dst any) {
 	t.Helper()
 	raw, err := os.ReadFile(name)

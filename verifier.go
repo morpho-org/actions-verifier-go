@@ -84,6 +84,18 @@ type ReferralFee struct {
 	missingBPS bool
 }
 
+// MarshalJSON preserves the distinction between a missing fee cap and zero.
+func (r ReferralFee) MarshalJSON() ([]byte, error) {
+	var bps *int
+	if !r.missingBPS {
+		bps = &r.BPS
+	}
+	return json.Marshal(struct {
+		BPS       *int   `json:"bps,omitempty"`
+		Recipient string `json:"recipient"`
+	}{bps, r.Recipient})
+}
+
 // UnmarshalJSON distinguishes a missing or null bps from an explicit zero.
 func (r *ReferralFee) UnmarshalJSON(data []byte) error {
 	var decoded struct {
