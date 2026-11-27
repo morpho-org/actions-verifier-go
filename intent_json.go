@@ -81,5 +81,8 @@ func decodeIntent(data []byte, dst any, common *CommonIntent, nullObjects ...str
 	if err := json.Unmarshal(filtered, dst); err != nil {
 		return nil, err
 	}
+	if fee := raw["max_fee_bps"]; len(fee) == 0 || string(fee) == "null" {
+		common.MaxFeeBPS = -1
+	}
 	return raw, nil
 }
