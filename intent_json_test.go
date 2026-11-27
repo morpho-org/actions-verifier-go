@@ -111,6 +111,27 @@ func TestIntentJSONPreservesPrefilledFields(t *testing.T) {
 	}
 }
 
+func TestIntentJSONPreservesPrefilledFeeCap(t *testing.T) {
+	for _, intent := range []CalldataIntent{
+		&VaultCalldataIntent{CommonIntent: CommonIntent{MaxFeeBPS: 25}},
+		&BlueCalldataIntent{CommonIntent: CommonIntent{MaxFeeBPS: 25}},
+		&MidnightOfferManagementIntent{CommonIntent: CommonIntent{MaxFeeBPS: 25}},
+	} {
+		if err := json.Unmarshal([]byte(`{"amount":{"unit":"assets"}}`), intent); err != nil {
+			t.Fatal(err)
+		}
+		if cap := intent.calldataIntent().MaxFeeBPS; cap != 25 {
+			t.Fatalf("%T: prefilled cap = %d, want 25", intent, cap)
+		}
+		if err := json.Unmarshal([]byte(`{"max_fee_bps":null}`), intent); err != nil {
+			t.Fatal(err)
+		}
+		if cap := intent.calldataIntent().MaxFeeBPS; cap >= 0 {
+			t.Fatalf("%T: explicit null must invalidate the cap, got %d", intent, cap)
+		}
+	}
+}
+
 func TestReferralFeeJSONRoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		name, before, after string

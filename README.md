@@ -239,7 +239,8 @@ proof-free path if your application requires proof.
 - Go takes typed intents and calls, not arbitrary JavaScript objects. If you
   decode JSON into those types, the Go decoder can reject inputs that
   TypeScript ignores or accepts, and malformed JSON can produce a decoding
-  error before the verifier runs.
+  error before the verifier runs. Include `"max_fee_bps": 0` explicitly for a
+  zero fee cap in JSON; a prefilled Go zero is indistinguishable from an unset cap.
 - Go's JSON decoder replaces unpaired UTF-16 surrogate escapes with U+FFFD;
   JavaScript preserves those code units. If interoperating between the two,
   use only well-formed Unicode strings in JSON, including in proof claims and
